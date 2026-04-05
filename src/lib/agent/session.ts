@@ -74,6 +74,7 @@ const EMPTY_STATE: SessionState = {
 export class SessionStateManager {
   private state: SessionState = { ...EMPTY_STATE };
   private loaded = false;
+  private currentProjectId: string | null = null;
 
   /**
    * Load session state from disk. Returns true if a valid (non-expired) session was restored.
@@ -88,10 +89,23 @@ export class SessionStateManager {
 
       const data = await fs.readJson(STATE_FILE);
 
-      // Check if session is expired
+      // Check if session is expired (idle too long)
       const elapsed = Date.now() - (data.lastActivityAt || 0);
       if (elapsed > SESSION_TIMEOUT_MS) {
         console.log(`[Session] ⏰ Session expired (${(elapsed / 60000).toFixed(1)} min idle). Starting fresh.`);
+        this.state = { ...EMPTY_STATE, createdAt: Date.now(), lastActivityAt: Date.now() };
+        this.loaded = true;
+        await this.save();
+        return false;
+      }
+
+      // BUG FIX: Check if session is TOO OLD (absolute age, not just idle time)
+      // This catches the case where the app was running for hours but a session
+      // from a completely different task is still "active"
+      const absoluteAge = Date.now() - (data.createdAt || 0);
+      const MAX_SESSION_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours absolute max
+      if (absoluteAge > MAX_SESSION_AGE_MS) {
+        console.log(`[Session] 🕐 Session too old (${(absoluteAge / 60000).toFixed(1)} min absolute age). Starting fresh.`);
         this.state = { ...EMPTY_STATE, createdAt: Date.now(), lastActivityAt: Date.now() };
         this.loaded = true;
         await this.save();
@@ -114,9 +128,10 @@ export class SessionStateManager {
         createdAt: data.createdAt || Date.now(),
       };
       this.loaded = true;
+      this.currentProjectId = data._projectId || null;
 
       const sessionAge = ((Date.now() - this.state.createdAt) / 60000).toFixed(1);
-      console.log(`[Session] ✅ Restored session (${sessionAge} min old) — ${this.state.callHistory.length} calls, ${this.state.fileRecords.length} files tracked, ${this.state.loadedSkills.length} skills`);
+      console.log(`[Session] ✅ Restored session (${sessionAge} min old, project: ${this.currentProjectId || 'unknown'}) — ${this.state.callHistory.length} calls, ${this.state.fileRecords.length} files tracked, ${this.state.loadedSkills.length} skills`);
       return true;
     } catch (err: any) {
       console.warn(`[Session] ⚠️ Failed to load session: ${err.message}`);
@@ -127,13 +142,40 @@ export class SessionStateManager {
   }
 
   /**
+   * Load session for a specific project/conversation.
+   * If the stored session belongs to a DIFFERENT project, reset it.
+   * This prevents stale state from old conversations bleeding into new ones.
+   */
+  public async loadForProject(projectId: string): Promise<boolean> {
+    const restored = await this.load();
+    
+    // If the session was from a DIFFERENT project/conversation, reset it
+    if (restored && this.currentProjectId && this.currentProjectId !== projectId) {
+      console.log(`[Session] 🔄 Project changed (${this.currentProjectId} → ${projectId}). Clearing stale session.`);
+      this.state = { ...EMPTY_STATE, createdAt: Date.now(), lastActivityAt: Date.now() };
+      this.currentProjectId = projectId;
+      await this.save();
+      return false;
+    }
+    
+    this.currentProjectId = projectId;
+    return restored;
+  }
+
+  /** Get the current project ID this session is bound to */
+  public getCurrentProjectId(): string | null {
+    return this.currentProjectId;
+  }
+
+  /**
    * Save current session state to disk.
    */
   public async save(): Promise<void> {
     try {
       this.state.lastActivityAt = Date.now();
       await fs.ensureDir(SESSION_DIR);
-      await fs.writeJson(STATE_FILE, this.state, { spaces: 2 });
+      // Save with _projectId metadata so loadForProject can detect project changes
+      await fs.writeJson(STATE_FILE, { ...this.state, _projectId: this.currentProjectId }, { spaces: 2 });
     } catch (err: any) {
       console.warn(`[Session] ⚠️ Failed to save session: ${err.message}`);
     }
@@ -236,6 +278,11 @@ export class SessionStateManager {
     if (this.state.actionSummary.length > 15) {
       this.state.actionSummary = this.state.actionSummary.slice(-15);
     }
+  }
+
+  /** Get the human-readable action summary. */
+  public getActions(): string[] {
+    return this.state.actionSummary || [];
   }
 
   /**

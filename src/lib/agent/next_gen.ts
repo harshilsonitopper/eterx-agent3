@@ -58,7 +58,7 @@ const TOOL_TTL: Record<string, number> = {
   realtime_verify: 2 * 60 * 1000,    // 2 min
 };
 
-// Tools that should NEVER be cached (have side effects)
+// Tools that should NEVER be cached (have side effects or need fresh results)
 const UNCACHEABLE_TOOLS = new Set([
   'workspace_write_file', 'workspace_edit_file', 'system_shell',
   'workspace_run_command', 'workspace_verify_code', 'git_operations',
@@ -67,6 +67,9 @@ const UNCACHEABLE_TOOLS = new Set([
   'desktop_notification', 'email_sender', 'tts_engine',
   'process_manager', 'task_scheduler', 'file_watcher',
   'code_generator', 'compression_tool', 'self_improve',
+  'ask_user',            // MUST always actually ask the user
+  'task_checkpoint',     // MUST always read/write real checkpoint state
+  'get_skill_guidelines', // Skills should load fresh content each time
 ]);
 
 export class IntelligentCache {

@@ -60,6 +60,43 @@ export const shellTool: ToolDefinition = {
       } else {
         cwd = defaultDir;
       }
+
+      // === AGENTX SOURCE PROTECTION ===
+      // Block shell commands from running inside protected AgentX directories
+      const cwdLower = cwd.toLowerCase().replace(/\\/g, '/');
+      const agentxRoot = defaultDir.toLowerCase().replace(/\\/g, '/');
+      const protectedDirs = ['src', 'electron', 'public', '.git', '.next', 'node_modules'];
+      
+      for (const dir of protectedDirs) {
+        const protectedPath = `${agentxRoot}/${dir}`;
+        if (cwdLower.startsWith(protectedPath)) {
+          return {
+            CRITICAL_ERROR: `🛡️ BLOCKED: Cannot run shell commands inside AgentX ${dir}/ directory. This is a protected source folder. Use a different working directory like Desktop.`,
+            stdout: '',
+            stderr: '',
+            exitCode: 1,
+            executionTimeMs: 0
+          };
+        }
+      }
+
+      // Block commands that target AgentX source files via redirection
+      const cmd = input.command;
+      const cmdLower = cmd.toLowerCase().replace(/\\/g, '/');
+      const agentxSrcPath = `${agentxRoot}/src`.toLowerCase();
+      
+      if (cmdLower.includes(agentxSrcPath) && (
+        cmdLower.includes('>') || cmdLower.includes('set-content') || 
+        cmdLower.includes('out-file') || cmdLower.includes('tee ')
+      )) {
+        return {
+          CRITICAL_ERROR: `🛡️ BLOCKED: Cannot write to AgentX source files via shell. Use workspace_write_file for files outside the AgentX project.`,
+          stdout: '',
+          stderr: '',
+          exitCode: 1,
+          executionTimeMs: 0
+        };
+      }
       
       // Ensure the target directory exists before running command
       await fs.ensureDir(cwd);

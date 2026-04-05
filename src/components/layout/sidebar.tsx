@@ -33,7 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           initial={{ width: 0, opacity: 0 }}
           animate={{ width: 280, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
-          className="border border-white/5 bg-[#0A0A0A]/95 rounded-[32px] flex flex-col flex-shrink-0 z-20 h-full backdrop-blur-xl overflow-hidden shadow-2xl relative"
+          className="border-r border-white/5 bg-[#0A0A0A] flex flex-col flex-shrink-0 z-20 h-full rounded-tr-[32px] rounded-br-[32px] overflow-hidden"
         >
           <div className="p-3">
             <div className="px-3 py-3 font-serif text-[20px] text-[#E8E6E3] font-medium flex items-center justify-between cursor-pointer transition-opacity tracking-tight">
@@ -50,12 +50,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Tooltip text="Start a fresh conversation" side="right">
                 <button
                   onClick={() => { createNewChat(); setActiveView('chat'); }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 text-[14px] font-medium text-[#E8E6E3] hover:bg-white/10 active:bg-white/20 bg-white/5 rounded-lg transition-all duration-300 ease-out active:scale-95 shadow-sm group"
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-[14px] font-medium text-[#E8E6E3] bg-white/[0.03] border border-white/5 rounded-lg transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] hover:bg-white/[0.08] hover:border-white/20 active:scale-95 shadow-[0_4px_20px_rgba(0,0,0,0.3)] group"
                 >
                   <div className="flex items-center gap-3">
-                    <Plus className="w-[18px] h-[18px] text-[#E8E6E3]" /> New chat
+                    <Plus className="w-[18px] h-[18px] text-[#E8E6E3] group-hover:rotate-90 transition-transform duration-500" /> New chat
                   </div>
-                  <span className="text-[10px] text-[#555350] tracking-widest font-mono group-hover:text-[#A3A19E] transition-colors">Ctrl+⇧+O</span>
+                  <span className="text-[10px] text-white/20 tracking-widest font-mono group-hover:text-white/40 transition-colors">Ctrl+⇧+O</span>
                 </button>
               </Tooltip>
 
@@ -64,9 +64,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Tooltip text="Search conversations" side="right">
                 <button
                   onClick={onSearchClick}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 text-[14px] font-medium text-[#A3A19E] hover:text-[#E8E6E3] hover:bg-white/5 active:bg-white/10 rounded-lg transition-all duration-300 ease-out active:scale-95 group"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-[14px] font-medium text-white/40 hover:text-white hover:bg-white/[0.04] rounded-lg transition-all duration-500 ease-out active:scale-95 group border border-transparent hover:border-white/5"
                 >
-                  <Search className="w-[18px] h-[18px] text-[#8C8A88] group-hover:text-[#E8E6E3]" /> Search
+                  <Search className="w-[18px] h-[18px] text-white/20 group-hover:text-white transition-all duration-500 group-hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]" /> Search
                 </button>
               </Tooltip>
               <Tooltip text="Manage workspace" side="right">
@@ -95,12 +95,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Tooltip text="Open code editor" side="right">
                 <button
                   onClick={() => setActiveView('code')}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-[14px] font-medium rounded-lg transition-all duration-300 ease-out active:scale-95 group ${ activeView === 'code'
-                      ? 'bg-[#E2765A]/10 text-[#E2765A] border border-[#E2765A]/20'
-                      : 'text-[#A3A19E] hover:text-[#E8E6E3] hover:bg-white/5 active:bg-white/10 border border-transparent'
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-[14px] font-medium rounded-lg transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] active:scale-95 group border ${ activeView === 'code'
+                      ? 'bg-[#E2765A]/10 text-[#E2765A] border-[#E2765A]/30 shadow-[0_0_20px_rgba(226,118,90,0.1)]'
+                      : 'text-white/40 hover:text-white hover:bg-white/[0.04] border-transparent hover:border-white/5'
                     }`}
                 >
-                  <Code2 className={`w-[18px] h-[18px] ${ activeView === 'code' ? 'text-[#E2765A]' : 'text-[#8C8A88] group-hover:text-[#E8E6E3]'
+                  <Code2 className={`w-[18px] h-[18px] transition-all duration-500 ${ activeView === 'code' ? 'text-[#E2765A] drop-shadow-[0_0_8px_rgba(226,118,90,0.6)]' : 'text-white/20 group-hover:text-white'
                     }`} /> Code
                 </button>
               </Tooltip>

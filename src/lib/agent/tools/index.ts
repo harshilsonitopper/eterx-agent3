@@ -44,6 +44,8 @@ import { envManagerTool, autoDocsTool } from './core/env_and_docs';
 import { gitIntelTool } from './core/git_intel';
 import { desktopControlTool } from './core/desktop_control';
 import { browserControlTool } from './core/browser_control';
+import { askUserTool } from './core/ask_user';
+import { checkpointTool } from './core/checkpoint';
 
 // ==========================================
 // WORKSPACE & DATA TOOLS (13 tools)
@@ -105,6 +107,8 @@ export function bootstrapTools() {
     envManagerTool, autoDocsTool, gitIntelTool,
     desktopControlTool,
     browserControlTool,
+    askUserTool,
+    checkpointTool,
 
     // === Workspace (13) ===
     workspaceReadTool, workspaceWriteTool, workspaceListDirectoryTool,

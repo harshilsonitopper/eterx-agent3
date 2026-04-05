@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import fse from 'fs-extra';
 import path from 'path';
 
-import { resolveWorkspacePath } from '../../workspace/path_resolver';
+import { resolveWorkspacePath, checkAgentXProtection } from '../../workspace/path_resolver';
 
 export const workspaceReadTool: ToolDefinition = {
   name: 'workspace_read_file',
@@ -38,15 +38,30 @@ export const workspaceWriteTool: ToolDefinition = {
   category: 'workspace',
   inputSchema: z.object({
     filename: z.string().describe('File path — absolute or relative to workspace'),
-    content: z.string().describe('Content to write')
+    content: z.string().describe('Content to write'),
+    append: z.boolean().optional().describe('Set to true to append to the file instead of overwriting. EXTREMELY helpful for the auto-chunk workflow.')
   }),
   outputSchema: z.object({ success: z.boolean(), path: z.string() }),
-  execute: async (input: { filename: string, content: string }) => {
+  execute: async (input: { filename: string, content: string, append?: boolean }) => {
     const filePath = resolveWorkspacePath(input.filename);
+    
+    // AgentX Source Protection Cloak — NEVER modify our own source
+    const protection = checkAgentXProtection(filePath);
+    if (protection.blocked) {
+      console.warn(`[Tool: workspace_write_file] 🛡️ BLOCKED: ${filePath}`);
+      return { success: false, error: protection.reason, path: filePath };
+    }
+    
     await fse.ensureDir(path.dirname(filePath));
 
-    console.log(`[Tool: workspace_write_file] Writing to: ${ filePath }`);
-    await fs.writeFile(filePath, input.content, 'utf-8');
+    console.log(`[Tool: workspace_write_file] ${input.append ? 'Appending' : 'Writing'} to: ${ filePath }`);
+    
+    if (input.append) {
+      await fs.appendFile(filePath, input.content, 'utf-8');
+    } else {
+      await fs.writeFile(filePath, input.content, 'utf-8');
+    }
+    
     return { success: true, path: filePath, size: input.content.length };
   }
 };
@@ -138,6 +153,13 @@ export const workspaceEditFileTool: ToolDefinition = {
   outputSchema: z.object({ success: z.boolean(), message: z.string() }),
   execute: async (input: { filename: string, edits: any[] }) => {
     const filePath = resolveWorkspacePath(input.filename);
+
+    // AgentX Source Protection Cloak — NEVER modify our own source
+    const protection = checkAgentXProtection(filePath);
+    if (protection.blocked) {
+      console.warn(`[Tool: workspace_edit_file] 🛡️ BLOCKED: ${filePath}`);
+      return { success: false, error: protection.reason };
+    }
 
     if (!await fse.pathExists(filePath)) throw new Error(`File not found: ${ filePath }`);
 

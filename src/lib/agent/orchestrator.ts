@@ -5,6 +5,7 @@ import { globalGeminiClient } from './gemini';
 import { Critic } from './roles/critic';
 import { SubAgentSpawner, globalSubAgentSpawner, resetCancelFlag } from './roles/sub_agent';
 import { globalSessionManager } from './session';
+import { intelligentCache } from './next_gen';
 import fs from 'fs-extra';
 import path from 'path';
 
@@ -141,8 +142,8 @@ export class AgentOrchestrator {
     // Reset global cancel flag from previous requests
     resetCancelFlag();
     
-    // Initialize session continuity
-    await globalSessionManager.load();
+    // Initialize session continuity — scoped per conversation to prevent stale state bleed
+    await globalSessionManager.loadForProject(projectId);
     globalSessionManager.setLastUserMessage(userRequest);
 
     // Setup workspace context
@@ -196,6 +197,29 @@ export class AgentOrchestrator {
         emitProgress('Self-correcting based on feedback', 88);
 
         try {
+          // CRITICAL: Clear dedup history + cache before retry so the agent can
+          // actually re-execute tools (e.g. docx_generator) with better content.
+          // Without this, semantic dedup blocks the retry from doing anything useful.
+          const sessionState = globalSessionManager.hydrate();
+          if (sessionState.callHistory) {
+            // Only clear tool-specific entries that the agent needs to retry
+            // Keep non-file-creation entries (like web_search) to avoid re-research
+            const keepEntries = new Set<string>();
+            for (const entry of sessionState.callHistory) {
+              const toolName = entry.split(':')[0];
+              // Keep research/skill entries, clear file creation entries
+              if (['web_search', 'web_scraper', 'get_skill_guidelines', 'task_decomposer'].includes(toolName)) {
+                keepEntries.add(entry);
+              }
+            }
+            sessionState.callHistory = keepEntries;
+            globalSessionManager.updateFromLoop(sessionState);
+            console.log(`[Orchestrator] 🧹 Cleared dedup history for retry (kept ${keepEntries.size} research entries)`);
+          }
+          
+          // Also clear the intelligent cache for this retry
+          intelligentCache.clear();
+          
           const retryPrompt = `[CRITIC FEEDBACK — SELF-CORRECTION REQUIRED]
 Your previous output was reviewed and REJECTED for this reason:
 "${evaluation.feedback}"

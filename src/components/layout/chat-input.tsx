@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Mic, StopCircle, FileText, X } from 'lucide-react';
+import { Plus, Mic, StopCircle, FileText, X, ArrowUp } from 'lucide-react';
 import { Tooltip } from '../ui/tooltip';
 
 interface Attachment {
@@ -49,31 +49,23 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   return (
-    <div className={`absolute left-0 right-0 w-full flex flex-col items-center z-30 transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${ traceLogsLength === 0
+    <div className={`absolute left-0 right-0 w-full flex flex-col items-center z-30 ${ traceLogsLength === 0
       ? 'top-[45%] -translate-y-1/2 px-4 sm:px-12'
-      : 'bottom-0 pb-6 pt-12 px-4 sm:px-12 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A]/90 to-transparent'
+      : 'bottom-0 pb-6 pt-12 px-4 sm:px-12 bg-gradient-to-t from-[#050505] via-[#050505]/95 to-transparent'
       }`}>
 
-      <AnimatePresence>
-        {traceLogsLength === 0 && !isThinking && (
-          <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20, filter: 'blur(5px)', scale: 0.95 }}
-            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="flex flex-col items-center mb-8 w-full max-w-[800px] pointer-events-none"
-          >
-            <div className="flex items-center gap-4">
-              <div className="w-[48px] h-[48px] relative drop-shadow-[0_0_15px_rgba(226,118,90,0.5)]">
-                <img src="/logo.png" alt="EterX Logo" className="w-full h-full object-contain" />
-              </div>
-              <h1 className="text-[44px] text-[#E8E6E3] font-serif tracking-tight leading-none font-medium text-transparent bg-clip-text bg-gradient-to-r from-white to-[#A3A19E]">
-                {greeting}, harshil
-              </h1>
+      {traceLogsLength === 0 && !isThinking && (
+        <div className="flex flex-col items-center mb-8 w-full max-w-[800px] pointer-events-none">
+          <div className="flex items-center gap-4">
+            <div className="w-[48px] h-[48px] relative drop-shadow-[0_0_15px_rgba(226,118,90,0.5)]">
+              <img src="/logo.png" alt="EterX Logo" className="w-full h-full object-contain" />
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <h1 className="text-[44px] text-[#E8E6E3] font-serif tracking-tight leading-none font-medium text-transparent bg-clip-text bg-gradient-to-r from-white to-[#A3A19E]">
+              {greeting}, harshil
+            </h1>
+          </div>
+        </div>
+      )}
 
       <div className="w-full max-w-[800px] flex flex-col pointer-events-auto relative">
         <AnimatePresence>
@@ -111,7 +103,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           )}
         </AnimatePresence>
 
-        <div className={`w-full bg-[#1A1A1A] rounded-[32px] shadow-2xl flex flex-col pt-4 pb-2 transition-all duration-300 ${ isRecording ? 'border-[#E2765A]/50 ring-2 ring-[#E2765A]/20' : 'border border-white/5 focus-within:border-white/10' }`}>
+        <div className={`w-full bg-[#161616] rounded-[32px] flex flex-col pt-4 pb-2 transition-all duration-300 ease-out shadow-[0_10px_30px_rgba(0,0,0,0.5)] ${ isRecording ? 'border-[#E2765A]/50 ring-4 ring-[#E2765A]/10' : 'border border-white/5 hover:border-white/10 focus-within:border-white/20 focus-within:shadow-[0_10px_40px_rgba(0,0,0,0.7)]' }`}>
           <input type="file" multiple ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
 
           <div className="px-5 pb-2">
@@ -124,8 +116,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                   handleSend();
                 }
               }}
-              placeholder={isRecording ? "Listening..." : "Ask EterX to generate"}
-              className={`w-full bg-transparent text-[16px] placeholder:text-[#8C8A88] focus:outline-none placeholder:font-normal min-h-[44px] max-h-[250px] resize-none overflow-y-auto custom-scrollbar leading-relaxed ${ isRecording ? 'text-[#E2765A]' : 'text-[#E8E6E3]' }`}
+              placeholder={isRecording ? "Listening..." : "Ask EterX to Work"}
+              className={`w-full bg-transparent text-[16px] placeholder:text-[#555350] focus:outline-none placeholder:font-normal min-h-[44px] max-h-[250px] resize-none overflow-y-auto custom-scrollbar leading-relaxed transition-colors duration-300 ${ isRecording ? 'text-[#E2765A]' : 'text-[#E8E6E3]' }`}
               rows={Math.min(6, Math.max(1, inputValue.split('\n').length))}
               style={{ caretColor: '#E2765A' }}
             />
@@ -145,9 +137,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
             <div className="flex items-center gap-1">
               <Tooltip text="Voice input" side="top">
-                 <button onClick={toggleSpeech} className={`p-2.5 rounded-full hover:bg-white/5 transition-all text-[#A3A19E] hover:text-white ${isRecording ? 'text-[#E2765A] animate-pulse' : ''}`}>
-                    <Mic className="w-[18px] h-[18px]" strokeWidth={2} />
-                 </button>
+                <button onClick={toggleSpeech} className={`p-2.5 rounded-full hover:bg-white/5 transition-all text-[#A3A19E] hover:text-white ${ isRecording ? 'text-[#E2765A] animate-pulse' : '' }`}>
+                  <Mic className="w-[18px] h-[18px]" strokeWidth={2} />
+                </button>
               </Tooltip>
               {isThinking ? (
                 <Tooltip text="Stop generation" side="top">
@@ -162,9 +154,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                       if (!inputValue.trim() && attachments.length === 0) return;
                       handleSend();
                     }}
-                    className={`w-[34px] h-[34px] ml-1 flex items-center justify-center rounded-full transition-all duration-500 ease-out ${ (inputValue.trim() || attachments.length > 0) ? 'bg-white text-black hover:scale-105 active:scale-95 shadow-md' : 'bg-white/10 text-[#555350] opacity-50 cursor-pointer' }`}
+                    className={`w-[34px] h-[34px] ml-1 flex items-center justify-center rounded-full transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] ${ (inputValue.trim() || attachments.length > 0) ? 'bg-gradient-to-tr from-white to-[#E8E6E3] text-[#0A0A0A] hover:scale-[1.12] active:scale-[0.88] shadow-[0_5px_20px_rgba(255,255,255,0.3)]' : 'bg-white/5 text-[#555350] hover:bg-white/10 hover:text-[#8C8A88] cursor-not-allowed opacity-50' }`}
                   >
-                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14m-7-7 7 7-7 7" /></svg>
+                     <ArrowUp className={`w-[18px] h-[18px] transition-all duration-500 ${ (inputValue.trim() || attachments.length > 0) ? 'text-black scale-110' : 'text-white/20' }`} strokeWidth={3} />
                   </button>
                 </Tooltip>
               )}

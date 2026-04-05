@@ -54,19 +54,41 @@ export class Critic {
       const performedActions = globalSessionManager.getActions().join(', ') || 'No physical tools executed.';
 
       const evaluationPrompt = `
-      You are the Critic Verification Layer of an Agent OS.
-      Your job is to evaluate if the agent successfully completed the user's task.
+      You are the Critic Verification Layer of a LOCAL DESKTOP Agent OS (EterX).
+      
+      ━━━ CRITICAL FACTS ABOUT THIS AGENT ━━━
+      - This agent runs LOCALLY on the user's Windows PC (NOT a web service, NOT a cloud API)
+      - It has REAL access to the file system, shell, browser, and all local resources
+      - Local file paths like "C:\\Users\\..." ARE valid and accessible to the user
+      - The agent saves files to the user's REAL Desktop, Documents, etc.
+      - DO NOT reject outputs because they contain local file paths — those are CORRECT
+      
+      ━━━ YOUR JOB ━━━
+      Evaluate if the agent's output ACTUALLY addresses the user's intent.
       
       User Goal: "${ userGoal }"
       Agent Output: "${ truncatedOutput }"
       
-      [CRITICAL CONTEXT]
-      The agent is NOT a simple text model — it is an OS-level agent with file system, shell, and browser tools.
-      During this task, the agent successfully performed these physical actions:
+      [PHYSICAL ACTIONS PERFORMED]
+      These are REAL actions the agent executed (not hallucinated):
       ${ performedActions }
       
-      Did the agent output accurately reflect its actions AND fully answer the goal?
-      (Do NOT reject the output as an "AI hallucination" if the agent claims to have created files or run code, because it actually has tools to do so).
+      ━━━ USER INTENT INTERPRETATION RULES ━━━
+      - If the user says something like "it's just 1 page" or "only X pages" AFTER previously asking for more pages, they are COMPLAINING that the output is too short. They are NOT requesting a shorter document. The agent should regenerate with MORE content.
+      - Short messages like "why stopped", "why sted", "continue" are follow-ups, not new tasks. The agent should explain or continue the previous task.
+      - If the user references "the report you made" or "what you created", they want the agent to address their PREVIOUS output, not create something new.
+      - Messages containing frustration ("just give me", "why", "not working") indicate the agent's previous attempt FAILED and needs fixing.
+      
+      ━━━ EVALUATION CRITERIA ━━━
+      1. Did the agent understand the user's ACTUAL intent (complaint vs request vs follow-up)?
+      2. Did the agent take appropriate actions for that intent?
+      3. Does the agent's output text accurately reflect what it actually did?
+      4. If files were created, are the file paths real absolute paths on the local system? (These are VALID)
+      
+      ━━━ DO NOT REJECT FOR THESE REASONS ━━━
+      - ❌ "Local file path is inaccessible" — WRONG. This is a local agent, paths ARE accessible.
+      - ❌ "Agent should provide a download link" — WRONG. Files are on the user's Desktop already.
+      - ❌ "File path is not in sandbox" — WRONG. Desktop paths are intentional for final deliverables.
       
       Respond STRICTLY in JSON format with exactly:
       {

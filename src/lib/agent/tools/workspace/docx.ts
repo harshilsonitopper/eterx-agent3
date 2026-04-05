@@ -8,6 +8,7 @@ import {
 import fs from 'fs/promises';
 import fse from 'fs-extra';
 import path from 'path';
+import os from 'os';
 import { resolveWorkspacePath } from '../../workspace/path_resolver';
 
 /**
@@ -41,6 +42,7 @@ The file is saved to the EXACT path you specify — use full paths like C:\\User
     title: z.string().describe('Document title shown on cover page'),
     subtitle: z.string().optional().describe('Optional subtitle or description'),
     author: z.string().optional().describe('Document author name'),
+    target_pages: z.number().optional().describe('Target number of pages. If set, content is validated to ensure minimum ~450 words per page. Use this to prevent thin documents.'),
     source_md_path: z.string().optional().describe('Path to a workspace .md draft file to compile into the DOCX. Use this if you drafted the report incrementally.'),
     markdown: z.string().optional().describe('The ENTIRE document content written as a massive Markdown string. Use if not using source_md_path.'),
   }),
@@ -57,17 +59,64 @@ The file is saved to the EXACT path you specify — use full paths like C:\\User
       let markdown = input.markdown || '';
 
       if (input.source_md_path) {
-         try {
-           markdown = await fs.readFile(input.source_md_path, 'utf8');
-           console.log(`[Tool: docx_generator] Loaded document content from draft: ${ input.source_md_path }`);
-         } catch (err: any) {
-           throw new Error(`Failed to read source draft: ${ err.message }`);
+         // Try multiple locations since workspace_write_file resolves to Desktop
+         // but source_md_path might be a relative path from CWD
+         const candidatePaths = [
+           input.source_md_path,
+           path.resolve(process.cwd(), input.source_md_path),
+           path.resolve(os.homedir(), 'OneDrive', 'Desktop', input.source_md_path),
+           path.resolve(os.homedir(), 'Desktop', input.source_md_path),
+           resolveWorkspacePath(input.source_md_path),
+         ];
+         
+         let loaded = false;
+         for (const candidatePath of candidatePaths) {
+           try {
+             markdown = await fs.readFile(candidatePath, 'utf8');
+             console.log(`[Tool: docx_generator] Loaded document content from: ${ candidatePath }`);
+             loaded = true;
+             break;
+           } catch { /* try next */ }
+         }
+         
+         if (!loaded) {
+           console.warn(`[Tool: docx_generator] ⚠️ Could not find source draft at any of ${candidatePaths.length} paths. Using inline markdown if available.`);
+           if (!markdown) {
+             throw new Error(`Failed to read source draft "${input.source_md_path}" — tried ${candidatePaths.length} locations. Use 'markdown' parameter instead.`);
+           }
          }
       }
 
       if (!markdown) {
          throw new Error('No content provided. You must provide either "markdown" string or a "source_md_path" pointing to a valid .md draft file.');
       }
+
+      // ═══ CONTENT DEPTH VALIDATOR ═══
+      // Ensures the content is ACTUALLY deep enough before building the document.
+      // This forces the agent to use chunked writing for long documents.
+      const wordCount = markdown.split(/\s+/).filter((w: string) => w.length > 0).length;
+      const targetPages = input.target_pages || 0;
+      const WORDS_PER_PAGE = 450; // Standard threshold
+      
+      if (targetPages > 0) {
+        const minWords = targetPages * WORDS_PER_PAGE;
+        if (wordCount < minWords * 0.6) { // Allow 40% tolerance
+          const shortfall = minWords - wordCount;
+          console.warn(`[Tool: docx_generator] ⚠️ Content too thin: ${wordCount} words for ${targetPages} pages (need ~${minWords})`);
+          return {
+            success: false,
+            path: '',
+            error: `CONTENT TOO SHORT: You provided ~${wordCount} words but need ~${minWords} words for ${targetPages} pages. You are ${shortfall} words short. ` +
+                   `Use the CHUNKED WRITING workflow: write each section separately into .workspaces/sandbox/draft.md using workspace_write_file (first section) and workspace_edit_file (append remaining sections), then call docx_generator with source_md_path=".workspaces/sandbox/draft.md". ` +
+                   `Each page needs ~${WORDS_PER_PAGE} words of REAL content (3-5 paragraphs of 4-6 sentences each).`
+          };
+        }
+      } else if (wordCount < 200) {
+        // Even without target_pages, reject extremely thin content
+        console.warn(`[Tool: docx_generator] ⚠️ Very thin content: only ${wordCount} words`);
+      }
+      
+      console.log(`[Tool: docx_generator] 📝 Content: ${wordCount} words${targetPages ? ` (target: ${targetPages} pages)` : ''}`);
 
       const docChildren: any[] = [];
 
@@ -266,11 +315,12 @@ The file is saved to the EXACT path you specify — use full paths like C:\\User
       await fse.ensureDir(path.dirname(targetPath));
       await fs.writeFile(targetPath, buffer);
 
-      // Estimate pages (roughly 40 lines per page in markdown format)
-      const estimatedPages = Math.max(1, Math.ceil(lines.length / 40) + 1);
+      // Estimate pages using word count (~500 words per page is standard)
+      const totalWords = cleanMarkdown.split(/\s+/).filter((w: string) => w.length > 0).length;
+      const estimatedPages = Math.max(1, Math.ceil(totalWords / 500) + 1); // +1 for cover page
 
-      console.log(`[Tool: docx_generator] ✅ Created ${ estimatedPages }-page document at: ${ targetPath }`);
-      return { success: true, path: targetPath, pages_estimate: estimatedPages };
+      console.log(`[Tool: docx_generator] ✅ Created ${ estimatedPages }-page document (~${totalWords} words) at: ${ targetPath }`);
+      return { success: true, path: targetPath, pages_estimate: estimatedPages, word_count: totalWords };
     } catch (error: any) {
       console.error(`[Tool: docx_generator] ❌ Error:`, error.message);
       return { success: false, path: '', error: error.message };

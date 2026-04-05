@@ -32,7 +32,7 @@ let tgReady = false;
 
 // We need a Telegram API ID and Hash. (Providing placeholder default that user can override)
 const apiId = process.env.TELEGRAM_API_ID ? parseInt(process.env.TELEGRAM_API_ID) : 2040; // Default test ID
-const apiHash = process.env.TELEGRAM_API_HASH || 'b18441a1ff607e10a989891a5462e627';
+const apiHash = process.env.TELEGRAM_API_HASH || '';
 
 // GramJS Authentication Promisers
 let resolvePhone: ((phone: string) => void) | null = null;

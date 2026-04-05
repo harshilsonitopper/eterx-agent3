@@ -161,67 +161,109 @@ export class ContextWindowManager {
     return Math.ceil(text.length / 4);
   }
 
+  /** Tools whose results should NEVER be summarized — their content is critical */
+  private static PROTECTED_TOOLS = new Set([
+    'get_skill_guidelines',   // Skill content — agent NEEDS this for the entire task
+    'task_decomposer',        // Task plan — agent references this throughout
+    'ask_user',               // User answers — always important
+  ]);
+
+  /** Tools whose results can be aggressively summarized — they're verbose */
+  private static VERBOSE_TOOLS = new Set([
+    'web_search',
+    'workspace_list_directory',
+    'workspace_search_text',
+    'system_shell',           // Shell output can be huge
+  ]);
+
   /**
    * Trim conversation contents to fit within a safe context window.
-   * Preserves: system instruction, first user message, last 8 turns.
-   * Summarizes: old tool responses, removes old thought parts.
+   * 
+   * IMPROVED v2:
+   * - Skill guidelines are NEVER summarized (fixes lost skill connection)
+   * - Larger tail (18 entries) for better long-task continuity
+   * - Smarter summarization that preserves key tool results
+   * - Protected tools list prevents critical context from being lost
    * 
    * @param contents The full conversation history
    * @param maxTokens Target maximum tokens (default: 800K, safe for Gemini)
    * @returns Trimmed contents
    */
   static trimContents(contents: any[], maxTokens: number = 800000): any[] {
-    // Estimate current size
-    const totalChars = JSON.stringify(contents).length;
     const estimatedTokens = this.estimateTokens(JSON.stringify(contents));
 
     if (estimatedTokens < maxTokens * 0.8) {
-      // Under 80% — no trimming needed
-      return contents;
+      return contents; // Under 80% — no trimming needed
     }
 
     console.log(`[ContextManager] ⚠️ Context is ${(estimatedTokens / 1000).toFixed(0)}K tokens. Trimming...`);
 
-    // Strategy: Keep first 2 entries and last 10 entries intact
-    // Middle entries: summarize tool responses, drop thinking parts, strip SYSTEM injections
+    // IMPROVED: Larger tail for long tasks, protects more recent context
     const keepHead = 2;
-    const keepTail = 10;
+    const keepTail = 18; // Was 10 — doubled for better long-task continuity
 
     if (contents.length <= keepHead + keepTail) {
-      return contents; // Too short to trim
+      return contents;
     }
 
     const trimmed: any[] = [
       ...contents.slice(0, keepHead),
       {
         role: 'user',
-        parts: [{ text: '[SYSTEM] Earlier conversation was summarized to manage context. Recent context is intact.' }]
+        parts: [{ text: '[SYSTEM] Earlier conversation was summarized to manage context. Recent context is intact. If you loaded any skills via get_skill_guidelines, their content is preserved below.' }]
       },
     ];
 
-    // Middle section: summarize
+    // Middle section: smart summarization
     const middle = contents.slice(keepHead, contents.length - keepTail);
     for (const entry of middle) {
       if (entry.role === 'user' && entry.parts) {
-        // Strip old [SYSTEM] injections and nudges — they're outdated
         const textContent = entry.parts.map((p: any) => p.text || '').join('');
+        
+        // Drop stale system injections
         if (textContent.startsWith('[SYSTEM]') || 
             textContent.includes('STOP THINKING and use your tools') ||
             textContent.includes('Continue to the next pending step')) {
-          continue; // Drop these completely — they're stale context
+          continue;
         }
 
-        // Summarize tool responses (functionResponse parts)
+        // Handle function responses (tool results)
         const hasFunctionResponse = entry.parts.some((p: any) => p.functionResponse);
         if (hasFunctionResponse) {
           const summarizedParts = entry.parts.map((p: any) => {
             if (p.functionResponse) {
+              const toolName = p.functionResponse.name;
               const outputStr = JSON.stringify(p.functionResponse.response?.output || '');
-              if (outputStr.length > 500) {
+              
+              // NEVER summarize protected tools (skills, task plans, user answers)
+              if (this.PROTECTED_TOOLS.has(toolName)) {
+                return p; // Keep FULL content
+              }
+              
+              // Aggressively summarize verbose tools
+              if (this.VERBOSE_TOOLS.has(toolName) && outputStr.length > 800) {
                 return {
                   functionResponse: {
-                    name: p.functionResponse.name,
-                    response: { output: { summary: `[Summarized: ${p.functionResponse.name} returned ${(outputStr.length / 1024).toFixed(1)}KB]` } },
+                    name: toolName,
+                    response: { output: { 
+                      summary: `[${toolName}: ${(outputStr.length / 1024).toFixed(1)}KB output]`,
+                      // Keep first 200 chars of result for key data
+                      preview: outputStr.substring(0, 200)
+                    }},
+                    ...(p.functionResponse.id ? { id: p.functionResponse.id } : {})
+                  }
+                };
+              }
+              
+              // Normal tools: summarize if > 1500 chars (was 500 — too aggressive)
+              if (outputStr.length > 1500) {
+                return {
+                  functionResponse: {
+                    name: toolName,
+                    response: { output: { 
+                      summary: `[${toolName}: ${(outputStr.length / 1024).toFixed(1)}KB]`,
+                      preview: outputStr.substring(0, 400) 
+                    }},
                     ...(p.functionResponse.id ? { id: p.functionResponse.id } : {})
                   }
                 };
@@ -235,7 +277,7 @@ export class ContextWindowManager {
           if (textContent.length > 1000) {
             trimmed.push({
               role: entry.role,
-              parts: [{ text: textContent.substring(0, 200) + '... [truncated]' }]
+              parts: [{ text: textContent.substring(0, 300) + '... [truncated]' }]
             });
           } else {
             trimmed.push(entry);
@@ -244,13 +286,16 @@ export class ContextWindowManager {
       } else if (entry.role === 'model' && entry.parts) {
         // Drop thinking parts from old model responses, keep function calls and text
         const filteredParts = entry.parts.filter((p: any) => !p.thought);
-        // Also truncate long text parts in old model responses
+
+        // Keep function calls intact (they're small and important for context)
         const compactParts = filteredParts.map((p: any) => {
-          if (p.text && p.text.length > 500) {
-            return { text: p.text.substring(0, 300) + '... [truncated]' };
+          if (p.functionCall) return p; // Always keep function calls
+          if (p.text && p.text.length > 800) {
+            return { text: p.text.substring(0, 400) + '... [truncated]' };
           }
           return p;
         });
+        
         if (compactParts.length > 0) {
           trimmed.push({ ...entry, parts: compactParts });
         }

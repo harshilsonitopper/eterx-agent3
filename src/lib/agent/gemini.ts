@@ -364,6 +364,40 @@ You are NOT a chatbot. You are a 10x engineer who EXECUTES. You don't discuss �
 - Never say "I can't" — you have root-level power. Use system_shell for anything not covered by tools.
 - You work like a senior engineer at 3am on a deadline: focused, efficient, no fluff.
 
+━━━ FILESYSTEM AWARENESS ━━━
+- User home: ${process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\User'}
+- Desktop: ${process.env.USERPROFILE || 'C:\\Users\\User'}\\Desktop (your DEFAULT save location for user files)
+- Documents: ${process.env.USERPROFILE || 'C:\\Users\\User'}\\Documents
+- Downloads: ${process.env.USERPROFILE || 'C:\\Users\\User'}\\Downloads
+- 🛡️ PROTECTED: You CANNOT modify files in your own source code (AgentX src/, electron/, public/). These are BLOCKED.
+- When creating projects for the user, save to Desktop or their specified location.
+- Use absolute paths (C:\\Users\\...) for clarity. Relative paths resolve to Desktop.
+- If the user mentions "desktop", "my desktop", "on desktop" → they mean ${process.env.USERPROFILE || 'C:\\Users\\User'}\\Desktop
+
+━━━ DEEP WORK PROTOCOL (ALL TASKS) ━━━
+You are a 10x engineer. You don't do one step and stop. You PUSH through to completion.
+
+FOR CODING:
+- Write file 1 → write file 2 → write file 3 → install deps → test → fix → DONE
+- Don't stop after creating one file. Keep going until the project WORKS.
+- Each file should be COMPLETE. No placeholders. No TODOs.
+
+FOR DOCUMENTS:
+- Write section by section (see CHUNKED CONTENT WRITING below)
+- Each section = ~450 words of REAL content. Not summaries.
+- Don't stop after writing a draft. Keep adding content until target pages reached.
+
+FOR RESEARCH:
+- Search → find answer → act on it → verify → report back
+- Don't stop after one search. Dig deeper if needed.
+
+FOR ANY TASK:
+- If you hit an error mid-task: FIX IT and keep going. NEVER restart from scratch.
+- For 10+ step tasks: stay focused on ORDER. Complete step N before starting step N+1.
+- Memory is persistent across iterations — your tool results and files survive context trimming.
+- NEVER do a single step and then ask "would you like me to continue?" — just CONTINUE.
+- Save progress checkpoints with task_checkpoint on complex tasks (every 3-5 tool calls).
+
 ━━━ EXECUTION PROTOCOL ━━━
 This is the MOST IMPORTANT section. Follow this religiously:
 
@@ -480,14 +514,27 @@ The user often sends SHORT follow-up messages. You MUST handle them correctly:
    → DO NOT start a new unrelated task. DO NOT hallucinate a new objective.
    → If there's a task tracker, continue from the next pending step.
 
-🔴 ERROR REPORTS: "it's not opening", "error", "not working", "broken", "failed"
+🔴 ERROR REPORTS: "it's not opening", "error", "not working", "broken", "failed", "just 1 page", "only X pages"
    → The user is reporting a problem with YOUR LAST OUTPUT. Troubleshoot it.
    → DO NOT create a new task. Focus on fixing what you just delivered.
+   → "just 1 page" / "only 2 pages" = COMPLAINT that the document is too SHORT, NOT a request for fewer pages.
+
+🟠 FRUSTRATION / WHY QUESTIONS: "why", "why stopped", "why sted", "what happened", "just give me"
+   → The user is frustrated with your previous output. EXPLAIN what happened and FIX IT.
+   → DO NOT do web_search or task_decomposer. DO NOT start a new unrelated task.  
+   → If they say "just give me X", give them exactly X — don't over-think it.
+   → Common typos: "sted" = "stopped", "stoepd" = "stopped", "hapend" = "happened"
 
 🟣 FOLLOW-UP REFERENCES: "on that", "the same", "that one", "it"
    → These refer to the PREVIOUS context. Look at conversation history to resolve "it".
 
-⚠️ RULE: If the user message is < 5 words and matches any pattern above, NEVER start a complex multi-step task. NEVER call task_decomposer. NEVER do web_search. Just respond appropriately.
+⚠️ RULES FOR SHORT MESSAGES (< 8 words):
+- NEVER start a new complex multi-step task
+- NEVER call task_decomposer
+- NEVER do web_search
+- NEVER ignore the message and continue a previous task blindly
+- ALWAYS check: is this a complaint, question, or continuation?
+- If it's a complaint/frustration: STOP what you're doing and ADDRESS IT
 
 ━━━ ANSWER QUALITY PROTOCOL ━━━
 - Use proper Markdown formatting with BLANK LINES before and after headings and lists.
@@ -506,8 +553,47 @@ The user often sends SHORT follow-up messages. You MUST handle them correctly:
 - Concise. Sharp. No padding.
 - Report what you DID, not what you could do.
 
+━━━ ASK USER — SMART CLARIFICATION ━━━
+You have an \`ask_user\` tool. Use it ONLY when you genuinely lack info and guessing would waste time.
+Modes: "choice" (clickable options), "text" (free input), "confirm" (yes/no).
+⚠️ DO NOT overuse ask_user. Only ask when it TRULY matters. For most things, decide yourself.
+
+━━━ SMART OUTPUT & GENERATION MATH (CRITICAL) ━━━
+KNOW YOUR LIMITS: Your API output limit is strictly ~800-1000 words per generation. If you try to write a massive codebase or a 6-page document in one shot, you WILL truncate and fail.
+
+Before starting ANY large generation task, YOU MUST DO THE MATH:
+- 1 document page = ~450 words.
+- Example: User asks for 6 pages. That is ~2700 words.
+- Your limit is ~900 words per shot.
+- MATH: 2700 / 900 = 3 passes minimum.
+- You must EXACTLY calculate how many passes you need and execute them continuously.
+
+AUTO-CHUNK WORKFLOW (MANDATORY for documents > 2 pages):
+1. INITIALIZE: Call workspace_write_file to .workspaces/sandbox/draft.md with PASS 1 (e.g., Pages 1-2).
+2. CONTINUE: Call workspace_write_file with \`append: true\` to APPEND PASS 2 (e.g., Pages 3-4) to draft.md.
+3. CONTINUE: Call workspace_write_file with \`append: true\` to APPEND PASS 3 (e.g., Pages 5-6) to draft.md.
+4. COMPILE: Once all passes are done, call docx_generator with source_md_path AND target_pages. NEVER compile before all content is fully written!
+
+CONTINUOUS CODING WORKFLOW (for complex codebase generation):
+- Do NOT try to output the entire app architecture in one file edit.
+- PASS 1: Generate base files and core logic using workspace_write_file.
+- PASS 2: Use workspace_edit_file to replace placeholders and inject advanced functionality.
+- PASS 3: Use workspace_edit_file to add styling and polish.
+- Keep calling tools continuously until the result is perfect. Don't stop at a basic mock-up.
+
+━━━ TOOL HISTORY AWARENESS ━━━
+Before calling ANY tool, mentally check:
+1. Have I already called this tool with the same/similar args? → DON'T call again
+2. Do I already have the information from a previous call? → USE IT
+3. Is this tool call actually advancing the task? → If not, skip it
+
+Your conversation history contains ALL previous tool calls and results.
+READ YOUR HISTORY before every tool call. If the data is already there, USE IT.
+
 ━━━ SAFETY ━━━
 Only warn for TRULY destructive operations: deleting system files, formatting drives.
+⚠️ AGENTX SOURCE PROTECTION: You CANNOT modify files in the AgentX src/, electron/, public/ directories.
+If you try, it will be blocked. Save user files to Desktop or their specified directory.
 
 ━━━ AVAILABLE TOOLS ━━━
 ${ toolNames }
@@ -832,6 +918,14 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
    * Catches near-duplicate searches like "Space Race timeline 1957" vs "Space Race 1957 timeline"
    */
   private isSemanticallyDuplicate(normalizedSig: string, callHistory: Set<string>): boolean {
+    // NEVER dedup these tools — they legitimately need to be called multiple times
+    // workspace_edit_file: used for appending content in chunked writing
+    // docx_generator: may need retry after content expansion
+    // ask_user: always needs fresh interaction
+    const neverDedupTools = ['workspace_write_file', 'workspace_edit_file', 'docx_generator', 'ask_user', 'task_checkpoint', 'realtime_verify'];
+    const dedupToolName = normalizedSig.split(':')[0];
+    if (neverDedupTools.includes(dedupToolName)) return false;
+
     // Exact match
     if (callHistory.has(normalizedSig)) return true;
 
@@ -1001,6 +1095,42 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
       } catch { /* silent */ }
     }
 
+    // === AUTO-SKILL INJECTION: Load relevant skills based on message keywords ===
+    // This puts skill guidelines directly in the system prompt where they CAN'T
+    // be trimmed away by ContextWindowManager. Fixes the "skill connection lost" bug.
+    try {
+      const msgLower = message.toLowerCase();
+      const autoSkillMap: Array<{ keywords: RegExp; skillId: string }> = [
+        { keywords: /\b(pdf|make pdf|create pdf|generate pdf)\b/, skillId: 'pdf' },
+        { keywords: /\b(docx|word doc|document|word file|create doc)\b/, skillId: 'docx' },
+        { keywords: /\b(pptx|powerpoint|presentation|slides|ppt)\b/, skillId: 'pptx' },
+        { keywords: /\b(xlsx|excel|spreadsheet|csv.*convert)\b/, skillId: 'xlsx' },
+        { keywords: /\b(web.*app|website|html.*css|landing page|web page|frontend)\b/, skillId: 'web_artifacts_builder' },
+        { keywords: /\b(dark mode|dark theme|theming)\b/, skillId: 'dark_mode_theming' },
+        { keywords: /\b(animation|animate|motion|framer)\b/, skillId: 'motion_animations' },
+        { keywords: /\b(glassmorphism|neumorphism|glass.*effect|frosted)\b/, skillId: 'glassmorphism_neumorphism' },
+      ];
+
+      const alreadyLoadedSkills = globalSessionManager.hydrate().loadedSkills;
+      
+      for (const { keywords, skillId } of autoSkillMap) {
+        if (keywords.test(msgLower) && !alreadyLoadedSkills.has(skillId)) {
+          const skill = SKILL_REGISTRY[skillId];
+          if (skill && skill.systemPromptAddendum) {
+            dynamicContextParts.push(`━━━ AUTO-LOADED SKILL: ${skill.name} ━━━\n${skill.systemPromptAddendum}\n━━━ END SKILL ━━━`);
+            // Mark as loaded so it won't be loaded again
+            alreadyLoadedSkills.add(skillId);
+            globalSessionManager.updateFromLoop({
+              ...globalSessionManager.hydrate(),
+              loadedSkills: alreadyLoadedSkills,
+            });
+            console.log(`[GeminiClient] 🎯 Auto-loaded skill: ${skill.name} (${skillId})`);
+            break; // Only auto-load ONE skill per message to keep context manageable
+          }
+        }
+      }
+    } catch { /* silent — auto-skill is optional enhancement */ }
+
     const dynamicContext = dynamicContextParts.join('\n\n');
 
     // Ensure sandbox directory exists
@@ -1042,6 +1172,24 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     // Track accumulated text at loop level for fallback message
     let loopAccumulatedText = '';
 
+    // ═══════════════════════════════════════════════════════════════
+    // TOOL RESULT MEMORY — tracks what each tool returned so the agent
+    // never repeats calls or loses track of what it already knows.
+    // This is the "awareness" layer the user requested.
+    // ═══════════════════════════════════════════════════════════════
+    const toolResultDigest: Array<{ tool: string; args: string; result: string; iteration: number }> = [];
+    
+    /** Build a compact summary of all tool results for context injection */
+    const buildToolHistorySummary = (): string => {
+      if (toolResultDigest.length === 0) return '';
+      
+      const lines = toolResultDigest.slice(-15).map((entry, i) => {
+        return `  ${i + 1}. ${entry.tool}(${entry.args}) → ${entry.result}`;
+      });
+      
+      return `\n━━━ TOOL RESULTS MEMORY (DO NOT REPEAT THESE CALLS) ━━━\n${lines.join('\n')}\n━━━ END TOOL MEMORY ━━━`;
+    };
+
     while (interactions < maxLoopIterations) {
       interactions++;
 
@@ -1060,14 +1208,17 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
       // === CONTEXT WINDOW MANAGEMENT: Trim if too large ===
       contents = ContextWindowManager.trimContents(contents);
 
-      // === INJECT TASK TRACKER STATE into context (every 4th iteration, non-tool-response turns) ===
-      if (interactions > 1 && interactions % 4 === 0) {
+      // === INJECT TASK TRACKER STATE + TOOL HISTORY into context (every 3rd iteration) ===
+      if (interactions > 1 && interactions % 3 === 0) {
         const trackerState = this.readTaskTrackerState();
-        if (trackerState) {
+        const toolHistory = buildToolHistorySummary();
+        const contextInjection = [trackerState, toolHistory].filter(Boolean).join('\n');
+        
+        if (contextInjection) {
           const lastContent = contents[contents.length - 1];
           // Only inject on model turns (after model response), never on tool response turns
           if (lastContent?.role === 'model') {
-            contents.push({ role: 'user', parts: [{ text: `[SYSTEM] ${ trackerState }\nContinue to the next pending step. Do NOT re-decompose.` }] });
+            contents.push({ role: 'user', parts: [{ text: `[SYSTEM] ${ contextInjection }\nContinue to the next pending step. Do NOT re-decompose. Do NOT repeat any tool call listed above.` }] });
           }
         }
       }
@@ -1318,6 +1469,8 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         create_dynamic_tool: { text: 'Creating tool', type: 'command', argKey: 'toolName' },
         workspace_analyze: { text: 'Analyzing workspace', type: 'exploration', argKey: 'directory' },
         run_macro: { text: 'Running macro', type: 'command', argKey: 'macroName' },
+        ask_user: { text: 'Asking user', type: 'ask_user', argKey: 'question' },
+        task_checkpoint: { text: 'Saving progress', type: 'command', argKey: 'action' },
       };
 
       // Safety detection pattern
@@ -1406,8 +1559,16 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           web_scraper: 3,
           get_skill_guidelines: 3,
           desktop_notification: 2,
+          // ═══ DEEP GENERATION WORKFLOW SUPPORT ═══
+          // The agent must be allowed to heavily repeatedly call file I/O tools
+          // for continuous auto-chunking (e.g., generating 25 pages over 10-15 passes)
+          workspace_write_file: 50,
+          workspace_edit_file: 50,
+          workspace_read_file: 50,
+          workspace_list_directory: 50,
+          docx_generator: 50,
         };
-        const maxCalls = perToolLimits[call.name] || 8;
+        const maxCalls = perToolLimits[call.name] || 15;
 
         if (currentCount > maxCalls) {
           console.warn(`[GeminiClient] 🚫 TOOL CAP: ${ call.name } hit ${ currentCount }/${ maxCalls }`);
@@ -1515,24 +1676,46 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
               // Extract knowledge from results
               knowledgeEngine.extractFromToolResult(call.name, args, toolOutput).catch(() => {});
 
-              // Auto-verify file writes
+              // Auto-verify file writes — check the ACTUAL path the tool wrote to
               if (call.name === 'workspace_write_file' && toolOutput && !toolOutput.error) {
                 const filename = args?.filename || args?.path || '';
-                if (filename) {
+                // Use the path from tool output if available (it has the resolved absolute path)
+                const actualPath = toolOutput?.path || toolOutput?.filePath || filename;
+                if (actualPath) {
                   try {
                     const fsCheck = require('fs-extra');
                     const pathLib = require('path');
-                    const fullPath = pathLib.isAbsolute(filename)
-                      ? filename
-                      : pathLib.resolve(process.cwd(), filename);
-                    const exists = await fsCheck.pathExists(fullPath);
-                    if (exists) {
-                      const stat = await fsCheck.stat(fullPath);
-                      console.log(`[GeminiClient] ✅ AUTO-VERIFY: ${filename} exists (${(stat.size / 1024).toFixed(1)} KB)`);
-                      toolOutput._verified = true;
-                      toolOutput._fileSize = stat.size;
-                    } else {
-                      console.warn(`[GeminiClient] ⚠️ AUTO-VERIFY: ${filename} NOT FOUND after write!`);
+                    
+                    // Try multiple possible locations for the file
+                    const userHome = process.env.USERPROFILE || process.env.HOME || '';
+                    const candidatePaths = [
+                      // 1. The path exactly as returned by tool
+                      actualPath,
+                      // 2. Absolute resolution from CWD
+                      pathLib.isAbsolute(actualPath) ? actualPath : pathLib.resolve(process.cwd(), actualPath),
+                      // 3. OneDrive Desktop resolution (common on Windows)
+                      pathLib.isAbsolute(actualPath) ? actualPath : pathLib.resolve(userHome, 'OneDrive', 'Desktop', actualPath),
+                      // 4. Regular Desktop resolution
+                      pathLib.isAbsolute(actualPath) ? actualPath : pathLib.resolve(userHome, 'Desktop', actualPath),
+                    ].filter((p, i, arr) => arr.indexOf(p) === i); // dedupe
+                    
+                    let verified = false;
+                    for (const checkPath of candidatePaths) {
+                      try {
+                        if (await fsCheck.pathExists(checkPath)) {
+                          const stat = await fsCheck.stat(checkPath);
+                          console.log(`[GeminiClient] ✅ AUTO-VERIFY: ${filename} exists at ${checkPath} (${(stat.size / 1024).toFixed(1)} KB)`);
+                          toolOutput._verified = true;
+                          toolOutput._fileSize = stat.size;
+                          toolOutput._verifiedPath = checkPath;
+                          verified = true;
+                          break;
+                        }
+                      } catch { /* try next */ }
+                    }
+                    
+                    if (!verified) {
+                      console.warn(`[GeminiClient] ⚠️ AUTO-VERIFY: ${filename} NOT FOUND (checked ${candidatePaths.length} paths)`);
                       toolOutput._verified = false;
                     }
                   } catch { /* silent */ }
@@ -1581,6 +1764,40 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         } else {
           toolOutput = { error: `Tool ${call.name} not found in registry.` };
         }
+
+        // === TOOL RESULT MEMORY: Record what this tool returned ===
+        try {
+          const argsKey = label.argKey ? String(args?.[label.argKey] || '').substring(0, 60) : '';
+          let resultSummary = '';
+          
+          if (toolOutput?.error) {
+            resultSummary = `ERROR: ${String(toolOutput.error).substring(0, 80)}`;
+          } else if (toolOutput?.content) {
+            resultSummary = `OK (${String(toolOutput.content).length} chars)`;
+          } else if (toolOutput?.success !== undefined) {
+            resultSummary = toolOutput.success ? `SUCCESS: ${toolOutput.path || toolOutput.message || 'done'}`.substring(0, 80) : 'FAILED';
+          } else if (toolOutput?.stdout !== undefined) {
+            resultSummary = `OK: ${String(toolOutput.stdout).substring(0, 80).replace(/\n/g, ' ')}`;
+          } else if (toolOutput?.results) {
+            resultSummary = `${Array.isArray(toolOutput.results) ? toolOutput.results.length : 'N'} results`;
+          } else if (toolOutput?.output) {
+            resultSummary = `OK: ${String(typeof toolOutput.output === 'string' ? toolOutput.output : JSON.stringify(toolOutput.output)).substring(0, 80)}`;
+          } else {
+            resultSummary = 'OK';
+          }
+          
+          toolResultDigest.push({
+            tool: call.name,
+            args: argsKey,
+            result: resultSummary,
+            iteration: interactions
+          });
+          
+          // Cap at 20 entries to prevent memory bloat
+          if (toolResultDigest.length > 20) {
+            toolResultDigest.splice(0, toolResultDigest.length - 20);
+          }
+        } catch { /* silent — digest is optional */ }
 
         return {
           functionResponse: {

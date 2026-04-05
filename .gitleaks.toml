@@ -1,0 +1,6 @@
+[allowlist]
+paths = [
+    'node_modules',
+    '.next',
+    'dist'
+]

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { ThinkingProcess, ProfessionalThought } from '../chat/thought-sequence';
+import { AskUserPrompt } from '../chat/ask-user-prompt';
 import { Tooltip } from '../ui/tooltip';
 
 interface ChatFeedProps {
@@ -115,14 +116,8 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
         </div>
       )}
 
-      <AnimatePresence>
-        {traceLogs.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.1, ease: "easeOut" }}
-            className="w-full max-w-3xl mx-auto pt-20 pb-4 relative"
-          >
+      {traceLogs.length > 0 && (
+          <div className="w-full max-w-3xl mx-auto pt-20 pb-4 relative">
             {groups.map((group, groupIdx) => {
               const first = group[0];
               if (first.type === 'user_action') {
@@ -165,11 +160,32 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
               const displayProcessLogs = processLogs;
               const displayFinalAnswer = finalAnswer;
 
+              // Extract ask_user events from process logs for inline rendering
+              const askUserLogs = group.filter(l => l.type === 'ask_user');
+              const nonAskLogs = displayProcessLogs.filter(l => l.type !== 'ask_user');
+
               return (
                 <div key={`group-${ groupIdx }`} id={`message-${groupIdx}`} className="w-full flex flex-col mb-8 scroll-m-20 relative">
-                  {displayProcessLogs.length > 0 && (
-                    <ThinkingProcess logs={displayProcessLogs} isThinking={isThinkingTurn} isLast={groupIdx === groups.length - 1} />
+                  {nonAskLogs.length > 0 && (
+                    <ThinkingProcess logs={nonAskLogs} isThinking={isThinkingTurn} isLast={groupIdx === groups.length - 1} />
                   )}
+
+                  {/* Render Ask User prompts inline */}
+                  {askUserLogs.map((askLog: any, askIdx: number) => (
+                    <AskUserPrompt
+                      key={`ask-${groupIdx}-${askIdx}`}
+                      question={askLog.question}
+                      mode={askLog.mode || 'text'}
+                      options={askLog.options || []}
+                      context={askLog.context}
+                      defaultValue={askLog.defaultValue}
+                      urgent={askLog.urgent}
+                      timestamp={askLog.timestamp}
+                      onAnswer={(answer) => {
+                        console.log('[ChatFeed] User answered ask_user:', answer);
+                      }}
+                    />
+                  ))}
 
                   {displayFinalAnswer && (
                     <div className="w-full group/assistant">
@@ -199,9 +215,8 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             })}
 
             <div ref={messagesEndRef} className="h-[2px]" />
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
     </div>
   );
 };
