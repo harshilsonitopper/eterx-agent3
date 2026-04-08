@@ -33,26 +33,26 @@ function createAIClient(): GoogleGenAI {
     const fallback = process.env.GEMINI_API_KEY || process.env.VITE_OPENROUTER_API_KEY;
     if (fallback) keys.push(fallback);
   }
-  
+
   // Pick a random key for load balancing (same as gemini.ts lines 43-46)
   const apiKey = keys[Math.floor(Math.random() * keys.length)] || '';
-  console.log(`[CodeChat] Using API key: ${apiKey.slice(0, 8)}... (${keys.length} keys found)`);
+  console.log(`[CodeChat] Using API key: ${ apiKey.slice(0, 8) }... (${ keys.length } keys found)`);
   return new GoogleGenAI({ apiKey });
 }
 
 // ─── System Prompt — powered by full code/ engine knowledge ───
 function buildSystemPrompt(workspacePath: string): string {
   const cwd = workspacePath || process.cwd();
-  
+
   // Get the master coding agent prompt (extracted from 1888 code/ files)
   let prompt = getCodeAgentSystemPrompt(cwd);
-  
+
   // Append tool enhancements from code/src/tools/*/prompt.ts
   const enhancements = getToolEnhancements();
   const allTools = globalToolRegistry.getAllTools();
   for (const tool of allTools) {
     if (enhancements[tool.name]) {
-      prompt += `\n## Tool: ${tool.name}\n${enhancements[tool.name]}\n`;
+      prompt += `\n## Tool: ${ tool.name }\n${ enhancements[tool.name] }\n`;
     }
   }
 
@@ -62,16 +62,16 @@ function buildSystemPrompt(workspacePath: string): string {
     if (fs.existsSync(fpath)) {
       try {
         const content = fs.readFileSync(fpath, 'utf-8');
-        prompt += `\n## ${fname}\n${content.slice(0, 3000)}\n`;
-      } catch {}
+        prompt += `\n## ${ fname }\n${ content.slice(0, 3000) }\n`;
+      } catch { }
     }
   }
 
   // Git context
   try {
     const branch = execSync('git branch --show-current', { cwd, encoding: 'utf-8', timeout: 500 }).trim();
-    prompt += `\n# Git Context\n- Branch: ${branch}\n`;
-  } catch {}
+    prompt += `\n# Git Context\n- Branch: ${ branch }\n`;
+  } catch { }
 
   return prompt;
 }
@@ -97,7 +97,7 @@ function extractBetween(source: string, startMarker: string, endMarker: string):
 let _cachedToolDeclarations: any[] | null = null;
 function buildToolDeclarations() {
   if (_cachedToolDeclarations) return _cachedToolDeclarations;
-  
+
   const tools = globalToolRegistry.getAllTools();
   // Pick the most important coding tools to avoid hitting token limits
   const codingTools = [
@@ -128,7 +128,7 @@ function buildToolDeclarations() {
           delete params.properties[key]?.['additionalProperties'];
         }
       }
-    } catch {}
+    } catch { }
 
     return {
       name: tool.name,
@@ -136,7 +136,7 @@ function buildToolDeclarations() {
       parameters: params,
     };
   });
-  
+
   return _cachedToolDeclarations;
 }
 
@@ -144,7 +144,7 @@ function buildToolDeclarations() {
 async function executeRegistryTool(toolName: string, args: any, workspacePath: string): Promise<{ success: boolean; output: string }> {
   const tool = globalToolRegistry.getTool(toolName);
   if (!tool) {
-    return { success: false, output: `Unknown tool: ${toolName}` };
+    return { success: false, output: `Unknown tool: ${ toolName }` };
   }
 
   try {
@@ -168,7 +168,7 @@ async function executeRegistryTool(toolName: string, args: any, workspacePath: s
     const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
     return { success: true, output: output.slice(0, 30000) };
   } catch (err: any) {
-    return { success: false, output: `Tool error: ${err.message}` };
+    return { success: false, output: `Tool error: ${ err.message }` };
   }
 }
 
@@ -201,7 +201,7 @@ export async function POST(req: NextRequest) {
         let iterations = 0;
         const MAX_ITERATIONS = 15; // Anti-loop from code/src/eterx-bridge.ts
         let accumulatedAnswer = ''; // Accumulate text across iterations
-        
+
         // Pick exactly ONE API key to use for this entire interaction
         // If we randomize inside the loop, we might hit an invalid key mid-turn!
         const requestAiClient = createAIClient();

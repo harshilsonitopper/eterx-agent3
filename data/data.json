@@ -1,9 +1,0 @@
-[
-  {"year": 1789, "state": "VA", "candidate": "George Washington", "party": "Independent", "votes": 43782, "electoral_votes": 69},
-  {"year": 1800, "state": "NY", "candidate": "Thomas Jefferson", "party": "Democratic-Republican", "votes": 45000, "electoral_votes": 73},
-  {"year": 1860, "state": "IL", "candidate": "Abraham Lincoln", "party": "Republican", "votes": 1866531, "electoral_votes": 180},
-  {"year": 1960, "state": "MA", "candidate": "John F. Kennedy", "party": "Democrat", "votes": 34228465, "electoral_votes": 303},
-  {"year": 1960, "state": "MA", "candidate": "Richard Nixon", "party": "Republican", "votes": 34108157, "electoral_votes": 219},
-  {"year": 2020, "state": "GA", "candidate": "Joe Biden", "party": "Democrat", "votes": 81283501, "electoral_votes": 306},
-  {"year": 2020, "state": "GA", "candidate": "Donald Trump", "party": "Republican", "votes": 74223975, "electoral_votes": 232}
-]

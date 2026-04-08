@@ -78,7 +78,13 @@ export class IntelligentCache {
 
   /** Generate a deterministic cache key from tool name + args */
   private generateKey(toolName: string, args: any): string {
-    const normalized = JSON.stringify({ tool: toolName, args }, Object.keys(args || {}).sort());
+    const sortedArgs: any = {};
+    if (args && typeof args === 'object') {
+      Object.keys(args).sort().forEach(k => {
+        sortedArgs[k] = args[k];
+      });
+    }
+    const normalized = JSON.stringify({ tool: toolName, args: sortedArgs });
     return crypto.createHash('md5').update(normalized).digest('hex');
   }
 

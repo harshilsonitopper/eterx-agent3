@@ -2,5 +2,7 @@
 paths = [
     'node_modules',
     '.next',
-    'dist'
+    'dist',
+    '.workspaces',
+    '.git'
 ]

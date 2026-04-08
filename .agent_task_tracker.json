@@ -1,19 +1,19 @@
 {
-  "goal": "Build an interactive, deployed crypto market dashboard web app.\n1. Research and select free public APIs for real-time crypto prices (BTC, ETH, SOL) and Fear & Greed index.\n2. Scaffold a React + Tailwind CSS project.\n3. Implement the dashboard UI (price cards, line chart, Fear & Greed index).\n4. Integrate API fetching logic with error handling.\n5. Test the application locally.\n6. Deploy the application to a free hosting service (e.g., Vercel).\n7. Create a README file for API key management.",
-  "createdAt": 1775390807792,
+  "goal": "Create a 3D interactive world map app where hovering over a country displays the country name, the current leader's name, and their image. Additionally, create a comprehensive Excel spreadsheet containing a table of all current world leaders' names and details.",
+  "createdAt": 1775625322325,
   "complexity": "complex",
-  "estimatedMinutes": 60,
+  "estimatedMinutes": 45,
   "status": "in_progress",
   "steps": [
     {
       "id": "step_1",
       "step": 1,
-      "name": "Research APIs",
-      "description": "Use web_search to identify free, no-auth-required endpoints for CoinGecko or Binance for BTC, ETH, SOL prices and the Alternative.me API for the Fear & Greed Index.",
+      "name": "Research world leaders data",
+      "description": "Use web search to find a reliable, up-to-date list of all current world leaders, their countries, and image URLs.",
       "tools": [
         "web_search"
       ],
-      "done_when": "API endpoints for price data and Fear & Greed index are identified and documented.",
+      "done_when": "A comprehensive dataset of world leaders is retrieved.",
       "depends_on": [],
       "priority": "high",
       "status": "pending",
@@ -22,116 +22,113 @@
     {
       "id": "step_2",
       "step": 2,
-      "name": "Scaffold Project",
-      "description": "Run shell commands to create a new React project with Vite and install Tailwind CSS and Recharts for data visualization.",
+      "name": "Generate Excel spreadsheet",
+      "description": "Create a professional Excel file at C:\\Users\\AAYUSHI\\Desktop\\World_Leaders.xlsx containing columns: Country, Leader Name, and Image URL.",
       "tools": [
-        "system_shell"
+        "docx_generator"
       ],
-      "done_when": "Project directory exists with React, Tailwind, and Recharts dependencies installed.",
+      "done_when": "File exists at the specified path with all data populated.",
       "depends_on": [
         1
       ],
       "priority": "high",
-      "status": "done",
-      "completedAt": 1775391273795
+      "status": "pending",
+      "completedAt": null
     },
     {
       "id": "step_3",
       "step": 3,
-      "name": "Create API Service",
-      "description": "Create src/services/cryptoApi.js to handle fetch requests for the identified endpoints with error handling.",
+      "name": "Initialize 3D map project structure",
+      "description": "Create a directory C:\\Users\\AAYUSHI\\Desktop\\WorldMapApp and initialize a basic HTML structure using Three.js.",
       "tools": [
-        "workspace_write_file"
+        "system_shell"
       ],
-      "done_when": "src/services/cryptoApi.js is created and exports functional fetch methods.",
-      "depends_on": [
-        2
-      ],
+      "done_when": "Project directory exists with index.html.",
+      "depends_on": [],
       "priority": "high",
       "status": "done",
-      "completedAt": 1775390810864
+      "completedAt": 1775625398785
     },
     {
       "id": "step_4",
       "step": 4,
-      "name": "Implement Dashboard UI",
-      "description": "Write src/App.jsx using Tailwind CSS to create a responsive grid layout containing price cards and a Recharts line chart component.",
+      "name": "Write index.html",
+      "description": "Write the HTML file with a canvas element for the 3D scene and a UI overlay for the hover tooltip.",
       "tools": [
         "workspace_write_file"
       ],
-      "done_when": "App.jsx is written with layout, cards, and chart placeholders.",
+      "done_when": "index.html is created in the project folder.",
       "depends_on": [
         3
       ],
       "priority": "high",
       "status": "done",
-      "completedAt": 1775390884140
+      "completedAt": 1775625381003
     },
     {
       "id": "step_5",
       "step": 5,
-      "name": "Integrate Logic",
-      "description": "Edit src/App.jsx to import the API service and implement React state hooks to display live data.",
+      "name": "Write styles.css",
+      "description": "Write CSS to style the 3D canvas to fill the screen and define the appearance of the country information tooltip.",
       "tools": [
-        "workspace_edit_file"
+        "workspace_write_file"
       ],
-      "done_when": "App.jsx fetches and renders real-time data from the APIs.",
+      "done_when": "styles.css is created in the project folder.",
       "depends_on": [
         4
       ],
-      "priority": "high",
+      "priority": "medium",
       "status": "done",
-      "completedAt": 1775390894931
+      "completedAt": 1775625416444
     },
     {
       "id": "step_6",
       "step": 6,
-      "name": "Local Verification",
-      "description": "Run the development server using system_shell to verify the dashboard renders correctly and handles API errors.",
+      "name": "Write main.js",
+      "description": "Write the Three.js logic to load a 3D globe, implement raycasting for hover detection, and update the tooltip with data from the leaders list.",
       "tools": [
-        "system_shell",
-        "workspace_verify_code"
+        "workspace_write_file"
       ],
-      "done_when": "Application runs without console errors and displays data correctly.",
+      "done_when": "main.js is created in the project folder.",
       "depends_on": [
         5
       ],
       "priority": "high",
       "status": "done",
-      "completedAt": 1775391284660
+      "completedAt": 1775625443286
     },
     {
       "id": "step_7",
       "step": 7,
-      "name": "Create Documentation",
-      "description": "Create a README.md file explaining how to run the app and manage environment variables for API keys if needed.",
+      "name": "Verify code quality",
+      "description": "Run verification on the created files to ensure the Three.js implementation is syntactically correct.",
       "tools": [
-        "workspace_write_file"
+        "workspace_verify_code"
       ],
-      "done_when": "README.md is created in the root directory.",
+      "done_when": "Code passes verification checks.",
       "depends_on": [
         6
       ],
-      "priority": "low",
-      "status": "done",
-      "completedAt": 1775390888195
+      "priority": "medium",
+      "status": "pending",
+      "completedAt": null
     },
     {
       "id": "step_8",
       "step": 8,
-      "name": "Deploy to Vercel",
-      "description": "Use system_shell to initialize a git repository and run the Vercel CLI deployment command.",
+      "name": "Notify user",
+      "description": "Send a desktop notification confirming the 3D map app and Excel file are ready on the desktop.",
       "tools": [
-        "system_shell",
-        "git_operations"
+        "desktop_notification"
       ],
-      "done_when": "The application is live on a Vercel URL.",
+      "done_when": "Notification sent.",
       "depends_on": [
+        2,
         7
       ],
-      "priority": "high",
-      "status": "pending",
-      "completedAt": null
+      "priority": "low",
+      "status": "done",
+      "completedAt": 1775625561715
     }
   ]
 }

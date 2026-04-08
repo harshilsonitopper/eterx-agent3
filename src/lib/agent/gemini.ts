@@ -22,8 +22,8 @@ export class GeminiAgentClient {
   private ai!: GoogleGenAI;
   private apiKeys: string[] = [];
   private currentKeyIndex = 0;
-  private modelName = 'gemini-3.1-flash-lite-preview';
-  private fallbackModel = 'gemini-3-flash-preview';
+  private modelName = 'gemma-4-31b-it';
+  private fallbackModel = 'gemma-4-31b-it';
   private groundingEnabled = true;  // Auto-detect: tries Google Search grounding, disables if API rejects
 
   constructor() {
@@ -120,7 +120,11 @@ export class GeminiAgentClient {
           type: 'string',
           description: 'A highly personalized 2-5 word summary of this exact action for the user interface. Examples: "Writing app.js", "Researching global trends", "Running build script". Avoid generic terms.'
         };
-        cleaned.required = Array.isArray(cleaned.required) ? [...cleaned.required, 'uiActionText'] : ['uiActionText'];
+        cleaned.properties.uiIcon = {
+          type: 'string',
+          description: 'Select the most appropriate Lucide icon name from this list: Terminal, Search, Code, MessageSquare, Cpu, Sparkles, Check, FilePlus, FileEdit, FileSearch, FolderSearch, BookOpen, GitBranch, LayoutTemplate, MonitorPlay, Camera, Activity, Bell, FileText, Mail, Settings, Globe, FileArchive, Database, Link, Calculator, BarChart, Server, Youtube, Clipboard, Mic, Rss, Smartphone, ArrowRightLeft, FileJson, Hash, Settings2, Clock, Lock, RefreshCcw, Eye, PlayCircle, Split, Monitor. Example: "FileText".'
+        };
+        cleaned.required = Array.isArray(cleaned.required) ? [...cleaned.required, 'uiActionText', 'uiIcon'] : ['uiActionText', 'uiIcon'];
       }
 
       return {
@@ -136,7 +140,12 @@ export class GeminiAgentClient {
    */
   public buildToolsConfig(): any[] {
     const tools: any[] = [{ functionDeclarations: this.buildFunctionDeclarations() }];
-    if (this.groundingEnabled) {
+
+    // Gemma models natively reject Google Search Grounding tool configurations with a 400 Bad Request.
+    // We dynamically strip it if a Gemma model is active.
+    const isGemma = this.modelName.toLowerCase().includes('gemma');
+
+    if (this.groundingEnabled && !isGemma) {
       tools.push({ googleSearch: {} });
     }
     return tools;
@@ -339,7 +348,7 @@ export class GeminiAgentClient {
     const tzMinutes = Math.abs(tzOffset % 60);
     const tzSign = tzOffset <= 0 ? '+' : '-';
     const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown';
-    const tzLabel = `UTC${tzSign}${String(tzHours).padStart(2,'0')}:${String(tzMinutes).padStart(2,'0')} (${tzName})`;
+    const tzLabel = `UTC${ tzSign }${ String(tzHours).padStart(2, '0') }:${ String(tzMinutes).padStart(2, '0') } (${ tzName })`;
     const isoDate = now.toISOString();
     const year = now.getFullYear();
     const locale = Intl.DateTimeFormat().resolvedOptions().locale || 'en-IN';
@@ -365,14 +374,14 @@ You are NOT a chatbot. You are a 10x engineer who EXECUTES. You don't discuss �
 - You work like a senior engineer at 3am on a deadline: focused, efficient, no fluff.
 
 ━━━ FILESYSTEM AWARENESS ━━━
-- User home: ${process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\User'}
-- Desktop: ${process.env.USERPROFILE || 'C:\\Users\\User'}\\Desktop (your DEFAULT save location for user files)
-- Documents: ${process.env.USERPROFILE || 'C:\\Users\\User'}\\Documents
-- Downloads: ${process.env.USERPROFILE || 'C:\\Users\\User'}\\Downloads
+- User home: ${ process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\User' }
+- Desktop: ${ process.env.USERPROFILE || 'C:\\Users\\User' }\\Desktop (your DEFAULT save location for user files)
+- Documents: ${ process.env.USERPROFILE || 'C:\\Users\\User' }\\Documents
+- Downloads: ${ process.env.USERPROFILE || 'C:\\Users\\User' }\\Downloads
 - 🛡️ PROTECTED: You CANNOT modify files in your own source code (AgentX src/, electron/, public/). These are BLOCKED.
 - When creating projects for the user, save to Desktop or their specified location.
 - Use absolute paths (C:\\Users\\...) for clarity. Relative paths resolve to Desktop.
-- If the user mentions "desktop", "my desktop", "on desktop" → they mean ${process.env.USERPROFILE || 'C:\\Users\\User'}\\Desktop
+- If the user mentions "desktop", "my desktop", "on desktop" → they mean ${ process.env.USERPROFILE || 'C:\\Users\\User' }\\Desktop
 
 ━━━ DEEP WORK PROTOCOL (ALL TASKS) ━━━
 You are a 10x engineer. You don't do one step and stop. You PUSH through to completion.
@@ -848,7 +857,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           console.error(`[GeminiClient] 🔥 API/Network Error encountered: ${ errorMsg.substring(0, 200) }`);
 
           if (errorMsg.includes('503') || errorMsg.includes('unavailable') || errorMsg.includes('demand') || errorMsg.includes('500') || errorMsg.includes('404') || errorMsg.includes('not found')) {
-            console.warn(`[GeminiClient] 🛑 Model ${this.modelName} unavailable. Swapping to fallback model: ${this.fallbackModel}`);
+            console.warn(`[GeminiClient] 🛑 Model ${ this.modelName } unavailable. Swapping to fallback model: ${ this.fallbackModel }`);
             const tempModel = this.modelName;
             this.modelName = this.fallbackModel;
             this.fallbackModel = tempModel;
@@ -862,19 +871,19 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
             } else {
               // Multiple keys — rotate immediately
               console.warn(`[GeminiClient] 🚦 Rate limited. Rotating key immediately (0s delay)...`);
-                 this.rotateKey();
+              this.rotateKey();
               attempts++;
             }
           } else {
             // Non-rate-limit errors — rotate immediately
             this.rotateKey();
             attempts++;
-        }
+          }
         } else {
           console.error(`[GeminiClient] 💥 Fatal API exception: ${ errorMsg }`);
-        throw error;
+          throw error;
+        }
       }
-    }
     }
     throw new Error('All configured API keys failed or were rate-limited.');
   }
@@ -994,7 +1003,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     let taskDecomposerUsed = sessionHydrated ? sessionState.taskDecomposerUsed : false;
 
     if (sessionHydrated) {
-      console.log(`[GeminiClient] 🔄 Session restored: ${callHistory.size} calls, ${writtenFiles.size} files, ${loadedSkills.size} skills, decomposer=${taskDecomposerUsed}`);
+      console.log(`[GeminiClient] 🔄 Session restored: ${ callHistory.size } calls, ${ writtenFiles.size } files, ${ loadedSkills.size } skills, decomposer=${ taskDecomposerUsed }`);
     }
 
     // Category definitions for rate limiting
@@ -1023,33 +1032,33 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     const queryAnalysis = smartQueryRouter.analyze(message);
     const routingHint = smartQueryRouter.getRoutingHint(queryAnalysis);
     if (routingHint) {
-      console.log(`[GeminiClient] 🧭 Route: ${queryAnalysis.strategy} | Complexity: ${queryAnalysis.complexity} | Steps: ~${queryAnalysis.estimatedSteps}`);
+      console.log(`[GeminiClient] 🧭 Route: ${ queryAnalysis.strategy } | Complexity: ${ queryAnalysis.complexity } | Steps: ~${ queryAnalysis.estimatedSteps }`);
     }
 
     // === INTENT CLASSIFICATION: Understand what user really wants ===
     const intent = intentClassifier.classify(message);
     const intentHint = intentClassifier.getIntentHint(intent);
     if (intentHint) {
-      console.log(`[GeminiClient] 🎯 Intent: ${intent.primaryIntent} | Scope: ${intent.scope} | Urgency: ${intent.urgency}`);
+      console.log(`[GeminiClient] 🎯 Intent: ${ intent.primaryIntent } | Scope: ${ intent.scope } | Urgency: ${ intent.urgency }`);
     }
 
     // === ADAPTIVE LEARNING: Get tool recommendations from history ===
-    adaptiveLearning.load().catch(() => {});
+    adaptiveLearning.load().catch(() => { });
     const taskType = adaptiveLearning.classifyTask(message);
     const learningContext = adaptiveLearning.getLearningContext(message);
     if (learningContext) {
-      console.log(`[GeminiClient] 🧠 Adaptive: Task type "${taskType}" — recommendations loaded`);
+      console.log(`[GeminiClient] 🧠 Adaptive: Task type "${ taskType }" — recommendations loaded`);
     }
 
     // Initialize knowledge engine (lazy, first call only)
-    knowledgeEngine.load().catch(() => {});
+    knowledgeEngine.load().catch(() => { });
     const knowledgeContext = knowledgeEngine.getRelevantContext(message);
 
     // === COMBINE ALL INTELLIGENCE SIGNALS ===
     const intelligenceSignals: string[] = [];
     if (learningContext) intelligenceSignals.push(learningContext);
-    if (intentHint) intelligenceSignals.push(`[Intent: ${intent.primaryIntent} | Scope: ${intent.scope} | Urgency: ${intent.urgency}]`);
-    if (routingHint) intelligenceSignals.push(`[Route: ${queryAnalysis.strategy} | ~${queryAnalysis.estimatedSteps} steps]`);
+    if (intentHint) intelligenceSignals.push(`[Intent: ${ intent.primaryIntent } | Scope: ${ intent.scope } | Urgency: ${ intent.urgency }]`);
+    if (routingHint) intelligenceSignals.push(`[Route: ${ queryAnalysis.strategy } | ~${ queryAnalysis.estimatedSteps } steps]`);
     if (knowledgeContext) intelligenceSignals.push(knowledgeContext);
 
     // Build the contents array — this is our conversation history
@@ -1083,7 +1092,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     } catch { /* silent */ }
 
     // === SELF-REVIEW: For continuation/short messages, auto-review previous output ===
-    const isContinuation = message.trim().split(/\s+/).length < 8 && 
+    const isContinuation = message.trim().split(/\s+/).length < 8 &&
       /\b(continue|more|go on|keep|next|work|add|improve|enhance|fix|better|update)\b/i.test(message);
     if (isContinuation && globalSessionManager.hasActiveSession()) {
       try {
@@ -1112,19 +1121,19 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
       ];
 
       const alreadyLoadedSkills = globalSessionManager.hydrate().loadedSkills;
-      
+
       for (const { keywords, skillId } of autoSkillMap) {
         if (keywords.test(msgLower) && !alreadyLoadedSkills.has(skillId)) {
           const skill = SKILL_REGISTRY[skillId];
           if (skill && skill.systemPromptAddendum) {
-            dynamicContextParts.push(`━━━ AUTO-LOADED SKILL: ${skill.name} ━━━\n${skill.systemPromptAddendum}\n━━━ END SKILL ━━━`);
+            dynamicContextParts.push(`━━━ AUTO-LOADED SKILL: ${ skill.name } ━━━\n${ skill.systemPromptAddendum }\n━━━ END SKILL ━━━`);
             // Mark as loaded so it won't be loaded again
             alreadyLoadedSkills.add(skillId);
             globalSessionManager.updateFromLoop({
               ...globalSessionManager.hydrate(),
               loadedSkills: alreadyLoadedSkills,
             });
-            console.log(`[GeminiClient] 🎯 Auto-loaded skill: ${skill.name} (${skillId})`);
+            console.log(`[GeminiClient] 🎯 Auto-loaded skill: ${ skill.name } (${ skillId })`);
             break; // Only auto-load ONE skill per message to keep context manageable
           }
         }
@@ -1143,12 +1152,17 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     const config: import('@google/genai').GenerateContentConfig = {
       tools: this.buildToolsConfig(),
       systemInstruction: this.generateSystemPrompt(context, dynamicContext),
-      thinkingConfig: {
-        thinkingLevel: ThinkingLevel.MEDIUM,
-        includeThoughts: true,
-      },
       temperature: 0.35,
     };
+
+    // Gemma models do NOT support the native 'thinkingConfig' payload available to Gemini 2.0.
+    const isGemmaConfigLine = this.modelName.toLowerCase().includes('gemma');
+    if (!isGemmaConfigLine) {
+      config.thinkingConfig = {
+        thinkingLevel: ThinkingLevel.MEDIUM,
+        includeThoughts: true,
+      };
+    }
 
     // === ADAPTIVE MAX ITERATIONS: Scale based on task complexity ===
     let maxLoopIterations = 30; // default
@@ -1158,7 +1172,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     else if (intent.scope === 'project') maxLoopIterations = 60;
     // If task decomposer was used (complex task), bump up
     if (taskDecomposerUsed) maxLoopIterations = Math.max(maxLoopIterations, 50);
-    console.log(`[GeminiClient] 🔄 Max iterations: ${maxLoopIterations} (scope: ${intent.scope})`);
+    console.log(`[GeminiClient] 🔄 Max iterations: ${ maxLoopIterations } (scope: ${ intent.scope })`);
 
     // Scale category limits for complex tasks (now that intent is available)
     if (intent.scope === 'large' || intent.scope === 'project') {
@@ -1178,16 +1192,16 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     // This is the "awareness" layer the user requested.
     // ═══════════════════════════════════════════════════════════════
     const toolResultDigest: Array<{ tool: string; args: string; result: string; iteration: number }> = [];
-    
+
     /** Build a compact summary of all tool results for context injection */
     const buildToolHistorySummary = (): string => {
       if (toolResultDigest.length === 0) return '';
-      
+
       const lines = toolResultDigest.slice(-15).map((entry, i) => {
-        return `  ${i + 1}. ${entry.tool}(${entry.args}) → ${entry.result}`;
+        return `  ${ i + 1 }. ${ entry.tool }(${ entry.args }) → ${ entry.result }`;
       });
-      
-      return `\n━━━ TOOL RESULTS MEMORY (DO NOT REPEAT THESE CALLS) ━━━\n${lines.join('\n')}\n━━━ END TOOL MEMORY ━━━`;
+
+      return `\n━━━ TOOL RESULTS MEMORY (DO NOT REPEAT THESE CALLS) ━━━\n${ lines.join('\n') }\n━━━ END TOOL MEMORY ━━━`;
     };
 
     while (interactions < maxLoopIterations) {
@@ -1201,7 +1215,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         trace.push(cancelEvt);
         if (onTrace) onTrace(cancelEvt);
         globalSessionManager.setLastAgentOutput(cancelText);
-        globalSessionManager.save().catch(() => {});
+        globalSessionManager.save().catch(() => { });
         return { text: cancelText, trace };
       }
 
@@ -1213,7 +1227,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         const trackerState = this.readTaskTrackerState();
         const toolHistory = buildToolHistorySummary();
         const contextInjection = [trackerState, toolHistory].filter(Boolean).join('\n');
-        
+
         if (contextInjection) {
           const lastContent = contents[contents.length - 1];
           // Only inject on model turns (after model response), never on tool response turns
@@ -1246,22 +1260,22 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           const isModelError = errMsg.includes('not found') || errMsg.includes('404');
           const isTimeout = errMsg.includes('timeout') || errMsg.includes('DEADLINE_EXCEEDED');
 
-          console.warn(`[GeminiClient] ⚡ Stream attempt ${streamAttempts}/${maxStreamAttempts} failed: ${errMsg.substring(0, 80)}`);
+          console.warn(`[GeminiClient] ⚡ Stream attempt ${ streamAttempts }/${ maxStreamAttempts } failed: ${ errMsg.substring(0, 80) }`);
 
           if (isModelError && currentModel === this.modelName) {
             // Switch to fallback model immediately
             currentModel = this.fallbackModel;
-            console.log(`[GeminiClient] 🔄 Switching to fallback model: ${this.fallbackModel}`);
+            console.log(`[GeminiClient] 🔄 Switching to fallback model: ${ this.fallbackModel }`);
           } else if (isRateLimit || isServerError || isTimeout) {
             // Rotate API key immediately (no delay — speed is priority)
-             this.rotateKey();
+            this.rotateKey();
           } else {
             // Unknown error — rotate key and try
-             this.rotateKey();
+            this.rotateKey();
           }
 
           if (streamAttempts >= maxStreamAttempts) {
-            throw new Error(`All ${maxStreamAttempts} API attempts failed. Last error: ${errMsg.substring(0, 100)}`);
+            throw new Error(`All ${ maxStreamAttempts } API attempts failed. Last error: ${ errMsg.substring(0, 100) }`);
           }
         }
       }
@@ -1326,8 +1340,8 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           const reflection = await agentReflection.reflect(message, accumulatedText, toolsUsed);
 
           if (reflection.suggestions.length > 0) {
-            console.log(`[GeminiClient] 🪞 Reflection: ${reflection.quality} quality`);
-            reflection.suggestions.forEach(s => console.log(`   → ${s}`));
+            console.log(`[GeminiClient] 🪞 Reflection: ${ reflection.quality } quality`);
+            reflection.suggestions.forEach(s => console.log(`   → ${ s }`));
           }
 
           // Final answer — emit
@@ -1345,11 +1359,11 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           // === ADAPTIVE LEARNING: Record this interaction for future improvement ===
           const toolsUsedList = Array.from(callHistory).map(s => s.split(':')[0]);
           const taskDuration = Date.now() - (Date.now() - interactions * 2000); // Approximate
-          adaptiveLearning.recordTask(message, toolsUsedList, true, taskDuration).catch(() => {});
+          adaptiveLearning.recordTask(message, toolsUsedList, true, taskDuration).catch(() => { });
 
           // Log performance stats
           const perfStats = performanceAnalytics.getSummary();
-          console.log(`[GeminiClient] 📊 Session stats: ${perfStats.totalToolCalls} tool calls | ${perfStats.overallSuccessRate} success rate`);
+          console.log(`[GeminiClient] 📊 Session stats: ${ perfStats.totalToolCalls } tool calls | ${ perfStats.overallSuccessRate } success rate`);
 
           // Store final output in session for self-review on continuation
           globalSessionManager.setLastAgentOutput(finalText);
@@ -1365,7 +1379,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           trace.push(fallback);
           if (onTrace) onTrace(fallback);
           globalSessionManager.setLastAgentOutput(stuckText);
-          globalSessionManager.save().catch(() => {});
+          globalSessionManager.save().catch(() => { });
           return { text: stuckText, trace };
         }
 
@@ -1378,7 +1392,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         if (noToolCallStreak >= 3) {
           // Aggressive nudge
           nudge = trackerState
-            ? `CRITICAL: You've been thinking for ${noToolCallStreak} rounds WITHOUT acting. EXECUTE NOW. Use tools. ${ trackerState }`
+            ? `CRITICAL: You've been thinking for ${ noToolCallStreak } rounds WITHOUT acting. EXECUTE NOW. Use tools. ${ trackerState }`
             : 'CRITICAL: You are stuck in a thinking loop. STOP THINKING. Call a tool RIGHT NOW or give your final answer.';
         } else {
           nudge = trackerState
@@ -1490,11 +1504,11 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         if (call.name === 'spawn_sub_agent' && args?.mode === 'spawn' && args?.tasks) {
           const taskNames = args.tasks.map((t: any) => t.name || 'Agent').join(' + ');
           const taskSummary = args.tasks.map((t: any) => (t.task || '').substring(0, 30)).join(' | ');
-          secondary = `${taskNames}: ${taskSummary}`;
+          secondary = `${ taskNames }: ${ taskSummary }`;
         } else if (call.name === 'spawn_sub_agent' && args?.mode === 'status') {
-          secondary = args?.agentName ? `Check ${args.agentName}` : 'All agents status';
+          secondary = args?.agentName ? `Check ${ args.agentName }` : 'All agents status';
         } else if (call.name === 'spawn_sub_agent' && args?.mode === 'collect') {
-          secondary = args?.agentName ? `Collect ${args.agentName}` : 'Collect all results';
+          secondary = args?.agentName ? `Collect ${ args.agentName }` : 'Collect all results';
         }
 
         // Emit INSTANT UI feedback
@@ -1504,6 +1518,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         const evt = {
           type: label.type,
           text: displayText,
+          icon: args?.uiIcon,
           secondary,
           filename: args?.filename || args?.path || 'system',
           add: args?.content?.split?.('\n')?.length || 0,
@@ -1625,17 +1640,17 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           writtenFiles.add(filename);
           // Rich file tracking: store content preview + purpose
           const content = typeof args?.content === 'string' ? args.content : '';
-          const purpose = args?.uiActionText || `Created via ${call.name}`;
+          const purpose = args?.uiActionText || `Created via ${ call.name }`;
           globalSessionManager.trackFile(filename, 'created', purpose, content);
-          globalSessionManager.addAction(`Created: ${filename}`);
+          globalSessionManager.addAction(`Created: ${ filename }`);
         }
 
         // 6. File edit tracking
         if (call.name === 'workspace_edit_file') {
           const filename = String(args?.filename || args?.path || '').toLowerCase().trim();
-          const purpose = args?.uiActionText || `Edited via ${call.name}`;
+          const purpose = args?.uiActionText || `Edited via ${ call.name }`;
           globalSessionManager.trackFile(filename, 'edited', purpose, args?.newContent || args?.replacement || '');
-          globalSessionManager.addAction(`Edited: ${filename}`);
+          globalSessionManager.addAction(`Edited: ${ filename }`);
         }
 
         // === EXECUTE THE TOOL ===
@@ -1674,7 +1689,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
               intelligentCache.set(call.name, call.args, toolOutput);
 
               // Extract knowledge from results
-              knowledgeEngine.extractFromToolResult(call.name, args, toolOutput).catch(() => {});
+              knowledgeEngine.extractFromToolResult(call.name, args, toolOutput).catch(() => { });
 
               // Auto-verify file writes — check the ACTUAL path the tool wrote to
               if (call.name === 'workspace_write_file' && toolOutput && !toolOutput.error) {
@@ -1685,7 +1700,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
                   try {
                     const fsCheck = require('fs-extra');
                     const pathLib = require('path');
-                    
+
                     // Try multiple possible locations for the file
                     const userHome = process.env.USERPROFILE || process.env.HOME || '';
                     const candidatePaths = [
@@ -1698,13 +1713,13 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
                       // 4. Regular Desktop resolution
                       pathLib.isAbsolute(actualPath) ? actualPath : pathLib.resolve(userHome, 'Desktop', actualPath),
                     ].filter((p, i, arr) => arr.indexOf(p) === i); // dedupe
-                    
+
                     let verified = false;
                     for (const checkPath of candidatePaths) {
                       try {
                         if (await fsCheck.pathExists(checkPath)) {
                           const stat = await fsCheck.stat(checkPath);
-                          console.log(`[GeminiClient] ✅ AUTO-VERIFY: ${filename} exists at ${checkPath} (${(stat.size / 1024).toFixed(1)} KB)`);
+                          console.log(`[GeminiClient] ✅ AUTO-VERIFY: ${ filename } exists at ${ checkPath } (${ (stat.size / 1024).toFixed(1) } KB)`);
                           toolOutput._verified = true;
                           toolOutput._fileSize = stat.size;
                           toolOutput._verifiedPath = checkPath;
@@ -1713,9 +1728,9 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
                         }
                       } catch { /* try next */ }
                     }
-                    
+
                     if (!verified) {
-                      console.warn(`[GeminiClient] ⚠️ AUTO-VERIFY: ${filename} NOT FOUND (checked ${candidatePaths.length} paths)`);
+                      console.warn(`[GeminiClient] ⚠️ AUTO-VERIFY: ${ filename } NOT FOUND (checked ${ candidatePaths.length } paths)`);
                       toolOutput._verified = false;
                     }
                   } catch { /* silent */ }
@@ -1725,7 +1740,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
             } catch (err: any) {
               const execDuration = Date.now() - execStart;
               performanceAnalytics.recordToolCall(call.name, execDuration, false);
-              console.warn(`[GeminiClient] ⚠️ Tool ${call.name} failed: ${err.message}`);
+              console.warn(`[GeminiClient] ⚠️ Tool ${ call.name } failed: ${ err.message }`);
 
               // === MULTI-STRATEGY RECOVERY ===
               const recovery = multiStrategyRecovery.attemptRecovery(call.name, call.args, err.message);
@@ -1734,26 +1749,30 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
                 if (altTool) {
                   try {
                     toolOutput = await altTool.execute(recovery.newArgs, {});
-                    console.log(`[GeminiClient] ✅ Recovery succeeded via ${recovery.newTool}`);
+                    console.log(`[GeminiClient] ✅ Recovery succeeded via ${ recovery.newTool }`);
                     performanceAnalytics.recordToolCall(recovery.newTool, Date.now() - execStart, true);
                   } catch (recoveryErr: any) {
-                    toolOutput = { error: recoveryErr.message, _retryFailed: true,
-                      _suggestion: `Tool ${call.name} failed. Recovery via ${recovery.newTool} also failed.` };
+                    toolOutput = {
+                      error: recoveryErr.message, _retryFailed: true,
+                      _suggestion: `Tool ${ call.name } failed. Recovery via ${ recovery.newTool } also failed.`
+                    };
                   }
                 }
               } else {
                 // Standard retry
                 try {
                   toolOutput = await tool.execute(call.args as any, {});
-                  console.log(`[GeminiClient] ✅ Retry succeeded for ${call.name}`);
+                  console.log(`[GeminiClient] ✅ Retry succeeded for ${ call.name }`);
                 } catch (retryErr: any) {
-                  toolOutput = { error: retryErr.message, _retryFailed: true,
-                    _suggestion: `Tool ${call.name} failed twice. Try a different approach.` };
+                  toolOutput = {
+                    error: retryErr.message, _retryFailed: true,
+                    _suggestion: `Tool ${ call.name } failed twice. Try a different approach.`
+                  };
                 }
               }
 
               // Learn from error — both knowledge and persistent memory
-              knowledgeEngine.extractFromToolResult(call.name, args, toolOutput).catch(() => {});
+              knowledgeEngine.extractFromToolResult(call.name, args, toolOutput).catch(() => { });
               agentMemory.recordError(
                 call.name,
                 err.message,
@@ -1762,37 +1781,37 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
             }
           }
         } else {
-          toolOutput = { error: `Tool ${call.name} not found in registry.` };
+          toolOutput = { error: `Tool ${ call.name } not found in registry.` };
         }
 
         // === TOOL RESULT MEMORY: Record what this tool returned ===
         try {
           const argsKey = label.argKey ? String(args?.[label.argKey] || '').substring(0, 60) : '';
           let resultSummary = '';
-          
+
           if (toolOutput?.error) {
-            resultSummary = `ERROR: ${String(toolOutput.error).substring(0, 80)}`;
+            resultSummary = `ERROR: ${ String(toolOutput.error).substring(0, 80) }`;
           } else if (toolOutput?.content) {
-            resultSummary = `OK (${String(toolOutput.content).length} chars)`;
+            resultSummary = `OK (${ String(toolOutput.content).length } chars)`;
           } else if (toolOutput?.success !== undefined) {
-            resultSummary = toolOutput.success ? `SUCCESS: ${toolOutput.path || toolOutput.message || 'done'}`.substring(0, 80) : 'FAILED';
+            resultSummary = toolOutput.success ? `SUCCESS: ${ toolOutput.path || toolOutput.message || 'done' }`.substring(0, 80) : 'FAILED';
           } else if (toolOutput?.stdout !== undefined) {
-            resultSummary = `OK: ${String(toolOutput.stdout).substring(0, 80).replace(/\n/g, ' ')}`;
+            resultSummary = `OK: ${ String(toolOutput.stdout).substring(0, 80).replace(/\n/g, ' ') }`;
           } else if (toolOutput?.results) {
-            resultSummary = `${Array.isArray(toolOutput.results) ? toolOutput.results.length : 'N'} results`;
+            resultSummary = `${ Array.isArray(toolOutput.results) ? toolOutput.results.length : 'N' } results`;
           } else if (toolOutput?.output) {
-            resultSummary = `OK: ${String(typeof toolOutput.output === 'string' ? toolOutput.output : JSON.stringify(toolOutput.output)).substring(0, 80)}`;
+            resultSummary = `OK: ${ String(typeof toolOutput.output === 'string' ? toolOutput.output : JSON.stringify(toolOutput.output)).substring(0, 80) }`;
           } else {
             resultSummary = 'OK';
           }
-          
+
           toolResultDigest.push({
             tool: call.name,
             args: argsKey,
             result: resultSummary,
             iteration: interactions
           });
-          
+
           // Cap at 20 entries to prevent memory bloat
           if (toolResultDigest.length > 20) {
             toolResultDigest.splice(0, toolResultDigest.length - 20);
@@ -1822,26 +1841,26 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         callHistory, writtenFiles, loadedSkills,
         taskDecomposerUsed, toolCallCounts, categoryCallCounts
       });
-      globalSessionManager.save().catch(() => {});
+      globalSessionManager.save().catch(() => { });
     }
 
     // Max iterations reached — summarize what was accomplished
     const filesCreated = Array.from(writtenFiles);
     const toolCallTotal = Array.from(toolCallCounts.values()).reduce((a, b) => a + b, 0);
-    let fallbackText = `Reached maximum iterations (${maxLoopIterations}). `;
+    let fallbackText = `Reached maximum iterations (${ maxLoopIterations }). `;
     if (filesCreated.length > 0) {
-      fallbackText += `Files created/modified: ${filesCreated.join(', ')}. `;
+      fallbackText += `Files created/modified: ${ filesCreated.join(', ') }. `;
     }
     if (toolCallTotal > 0) {
-      fallbackText += `${toolCallTotal} tool calls executed. `;
+      fallbackText += `${ toolCallTotal } tool calls executed. `;
     }
-    fallbackText += loopAccumulatedText ? `\n\n${loopAccumulatedText}` : 'Say "continue" to resume from where I left off.';
+    fallbackText += loopAccumulatedText ? `\n\n${ loopAccumulatedText }` : 'Say "continue" to resume from where I left off.';
 
     const fallbackEvt = { type: 'answer', text: fallbackText };
     trace.push(fallbackEvt);
     if (onTrace) onTrace(fallbackEvt);
     globalSessionManager.setLastAgentOutput(fallbackText);
-    globalSessionManager.save().catch(() => {});
+    globalSessionManager.save().catch(() => { });
     return { text: fallbackText, trace };
   }
 }

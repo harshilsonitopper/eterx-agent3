@@ -58,12 +58,12 @@ class AgentMessageBus {
     completedAt?: number;
   }) {
     await this.ensureDir();
-    const filePath = path.join(AGENTS_DIR, `${agentName.toLowerCase().replace('-', '_')}.json`);
+    const filePath = path.join(AGENTS_DIR, `${ agentName.toLowerCase().replace('-', '_') }.json`);
     await fs.writeJson(filePath, { ...data, updatedAt: Date.now() }, { spaces: 2 });
   }
 
   async readAgentStatus(agentName: string): Promise<any | null> {
-    const filePath = path.join(AGENTS_DIR, `${agentName.toLowerCase().replace('-', '_')}.json`);
+    const filePath = path.join(AGENTS_DIR, `${ agentName.toLowerCase().replace('-', '_') }.json`);
     if (await fs.pathExists(filePath)) {
       return await fs.readJson(filePath);
     }
@@ -123,10 +123,10 @@ export class SubAgentSpawner {
    * Reduced from v3's massive prompt to save tokens.
    */
   private buildDeepBrief(task: string, agentName: SubAgentName, parentContext?: string): string {
-    return `━━━ SUB-AGENT: ${agentName} ━━━
+    return `━━━ SUB-AGENT: ${ agentName } ━━━
 🎯 You are a parallel sub-agent. Complete this task independently:
 
-${task}
+${ task }
 
 RULES:
 1. Full tool access. Use workspace_write_file, web_search, system_shell, etc.
@@ -137,13 +137,13 @@ RULES:
 6. When done, output a structured report.
 
 REPORT FORMAT:
-## ${agentName} — Complete
+## ${ agentName } — Complete
 **Task:** [what you did]
 **Files:** [paths created/modified]
 **Key Results:** [findings or deliverables]
 **Verified:** [yes/no]
 
-${parentContext ? `CONTEXT: ${parentContext}\n` : ''}
+${ parentContext ? `CONTEXT: ${ parentContext }\n` : '' }
 EXECUTE NOW.`.trim();
   }
 
@@ -158,7 +158,7 @@ EXECUTE NOW.`.trim();
     customName?: SubAgentName
   ): Promise<{ agentId: string, name: SubAgentName, result: string, success: boolean, durationMs: number, traceLog: string[] }> {
     const name = customName || this.getNextName();
-    const agentId = `${name.toLowerCase().replace('-', '_')}_${Date.now()}`;
+    const agentId = `${ name.toLowerCase().replace('-', '_') }_${ Date.now() }`;
 
     // Check cancellation before starting
     if (globalCancelFlag) {
@@ -179,7 +179,7 @@ EXECUTE NOW.`.trim();
     };
     this.activeAgents.set(agentId, instance);
 
-    console.log(`[${name}] ⚡ Spawned for: "${task.substring(0, 100)}..."`);
+    console.log(`[${ name }] ⚡ Spawned for: "${ task.substring(0, 100) }..."`);
 
     await agentMessageBus.writeAgentStatus(name, {
       status: 'running',
@@ -189,7 +189,7 @@ EXECUTE NOW.`.trim();
     });
 
     if (onTrace) {
-      onTrace({ type: 'command', text: `${name} spawned`, secondary: task.substring(0, 60) });
+      onTrace({ type: 'command', text: `${ name } spawned`, secondary: task.substring(0, 60) });
     }
 
     instance.status = 'running';
@@ -205,7 +205,7 @@ EXECUTE NOW.`.trim();
             throw new Error('CANCELLED_BY_USER');
           }
 
-          const logEntry = `[${new Date().toISOString()}] ${trace.type}: ${trace.text || ''}${trace.secondary ? ' | ' + trace.secondary : ''}`;
+          const logEntry = `[${ new Date().toISOString() }] ${ trace.type }: ${ trace.text || '' }${ trace.secondary ? ' | ' + trace.secondary : '' }`;
           traceLog.push(logEntry);
 
           // Write status every 3rd event
@@ -216,7 +216,7 @@ EXECUTE NOW.`.trim();
               progress: trace.text || 'Working...',
               traceLog: traceLog.slice(-10),
               startedAt: instance.startedAt
-            }).catch(() => {});
+            }).catch(() => { });
           }
 
           if (onTrace) {
@@ -245,14 +245,14 @@ EXECUTE NOW.`.trim();
         completedAt: instance.completedAt
       });
 
-      console.log(`[${name}] ✅ Completed in ${(durationMs / 1000).toFixed(1)}s`);
+      console.log(`[${ name }] ✅ Completed in ${ (durationMs / 1000).toFixed(1) }s`);
 
       if (onTrace) {
         // Emit detailed completion event for the main agent and UI
-        onTrace({ type: 'command', text: `${name} completed`, secondary: `${(durationMs / 1000).toFixed(1)}s` });
+        onTrace({ type: 'command', text: `${ name } completed`, secondary: `${ (durationMs / 1000).toFixed(1) }s` });
         onTrace({
           type: 'sub_agent_result',
-          text: `${name} finished: ${result.text.substring(0, 200)}`,
+          text: `${ name } finished: ${ result.text.substring(0, 200) }`,
           subAgent: name,
           fullResult: result.text,
           durationMs,
@@ -264,7 +264,7 @@ EXECUTE NOW.`.trim();
     } catch (error: any) {
       const durationMs = Date.now() - instance.startedAt;
       const wasCancelled = error.message === 'CANCELLED_BY_USER' || globalCancelFlag;
-      
+
       instance.status = wasCancelled ? 'cancelled' : 'failed';
       instance.result = wasCancelled ? 'Cancelled by user' : error.message;
       instance.completedAt = Date.now();
@@ -273,7 +273,7 @@ EXECUTE NOW.`.trim();
       await agentMessageBus.writeAgentStatus(name, {
         status: wasCancelled ? 'cancelled' : 'failed',
         task,
-        progress: wasCancelled ? 'Cancelled' : `Failed: ${error.message}`,
+        progress: wasCancelled ? 'Cancelled' : `Failed: ${ error.message }`,
         result: instance.result,
         traceLog,
         startedAt: instance.startedAt,
@@ -281,15 +281,15 @@ EXECUTE NOW.`.trim();
       });
 
       if (wasCancelled) {
-        console.log(`[${name}] 🛑 Cancelled after ${(durationMs / 1000).toFixed(1)}s`);
+        console.log(`[${ name }] 🛑 Cancelled after ${ (durationMs / 1000).toFixed(1) }s`);
       } else {
-        console.error(`[${name}] ❌ Failed in ${(durationMs / 1000).toFixed(1)}s: ${error.message}`);
+        console.error(`[${ name }] ❌ Failed in ${ (durationMs / 1000).toFixed(1) }s: ${ error.message }`);
       }
 
       if (onTrace) {
         onTrace({
           type: wasCancelled ? 'command' : 'safety_warning',
-          text: `${name} ${wasCancelled ? 'cancelled' : 'failed'}`,
+          text: `${ name } ${ wasCancelled ? 'cancelled' : 'failed' }`,
           secondary: wasCancelled ? 'Stopped by user' : error.message.substring(0, 60),
           subAgent: name
         });
@@ -318,17 +318,17 @@ EXECUTE NOW.`.trim();
     resetCancelFlag();
 
     const teamSize = tasks.length;
-    console.log(`\n[SubAgent] ━━━ SPAWNING ${teamSize} PARALLEL AGENTS ━━━`);
+    console.log(`\n[SubAgent] ━━━ SPAWNING ${ teamSize } PARALLEL AGENTS ━━━`);
     tasks.forEach((t, i) => {
       const name = t.name || AGENT_NAMES[i % AGENT_NAMES.length];
-      console.log(`  ${name}: ${t.task.substring(0, 80)}`);
+      console.log(`  ${ name }: ${ t.task.substring(0, 80) }`);
     });
 
     if (onTrace) {
       const spawnedAgents = tasks.map((t, i) => t.name || AGENT_NAMES[i % AGENT_NAMES.length]);
       onTrace({
         type: 'command',
-        text: `Spawning ${teamSize} parallel agents`,
+        text: `Spawning ${ teamSize } parallel agents`,
         secondary: spawnedAgents.join(' + '),
         spawnedAgents: spawnedAgents
       });
@@ -346,7 +346,7 @@ EXECUTE NOW.`.trim();
         }
         if (index > 0) {
           const staggerDelay = index * 8000; // 8s stagger (was 5s)
-          console.log(`[SubAgent] ⏳ ${name} staggered launch in ${staggerDelay / 1000}s...`);
+          console.log(`[SubAgent] ⏳ ${ name } staggered launch in ${ staggerDelay / 1000 }s...`);
           await new Promise(r => setTimeout(r, staggerDelay));
           // Re-check cancel after waiting
           if (globalCancelFlag) {
@@ -384,13 +384,13 @@ EXECUTE NOW.`.trim();
     const failCount = results.filter(r => !r.success).length;
 
     console.log(`\n[SubAgent] ━━━ TEAM RESULTS ━━━`);
-    console.log(`  Total: ${teamSize} | Success: ${successCount} | Failed: ${failCount} | Duration: ${(totalDurationMs / 1000).toFixed(1)}s`);
+    console.log(`  Total: ${ teamSize } | Success: ${ successCount } | Failed: ${ failCount } | Duration: ${ (totalDurationMs / 1000).toFixed(1) }s`);
 
     if (onTrace) {
       onTrace({
         type: 'command',
-        text: `${successCount}/${teamSize} agents completed`,
-        secondary: `${(totalDurationMs / 1000).toFixed(1)}s total`
+        text: `${ successCount }/${ teamSize } agents completed`,
+        secondary: `${ (totalDurationMs / 1000).toFixed(1) }s total`
       });
     }
 

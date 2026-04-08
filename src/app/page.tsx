@@ -18,10 +18,57 @@ interface ChatSession {
 
 const getCatchyGreeting = () => {
   const hour = new Date().getHours();
-  if (hour >= 5 && hour < 12) return "Good morning";
-  if (hour >= 12 && hour < 17) return "Good afternoon";
-  if (hour >= 17 && hour < 21) return "Good evening";
-  return "Late night focus";
+  // Professional yet engaging variations
+  if (hour >= 5 && hour < 12) {
+    const morningGreetings = [
+      "Good morning",
+      "Ready to innovate",
+      "System initialized",
+      "Morning focus mode",
+      "Let's build something great",
+      "Fresh start",
+      "Ready for deep work",
+      "Time to unlock potential"
+    ];
+    return morningGreetings[Math.floor(Math.random() * morningGreetings.length)];
+  }
+  if (hour >= 12 && hour < 17) {
+    const afternoonGreetings = [
+      "Good afternoon",
+      "Midday momentum",
+      "Afternoon deep work",
+      "Keep shipping",
+      "Optimal performance",
+      "Peak productivity hours",
+      "Let's keep the flow",
+      "Afternoon sync"
+    ];
+    return afternoonGreetings[Math.floor(Math.random() * afternoonGreetings.length)];
+  }
+  if (hour >= 17 && hour < 22) {
+    const eveningGreetings = [
+      "Good evening",
+      "Evening review",
+      "Wrapping up",
+      "Sunset coding",
+      "Steady progress",
+      "Evening focus",
+      "Reflect and refine",
+      "Closing out strong"
+    ];
+    return eveningGreetings[Math.floor(Math.random() * eveningGreetings.length)];
+  }
+  const nightGreetings = [
+    "Late night focus",
+    "Midnight oil burning",
+    "Quiet hours initialized",
+    "Deep logic mode",
+    "Nightshift activated",
+    "Zero distractions",
+    "The code never sleeps",
+    "Late night architect"
+  ];
+  return nightGreetings[Math.floor(Math.random() * nightGreetings.length)];
 };
 
 export default function DeepWorkUI() {
@@ -35,6 +82,8 @@ export default function DeepWorkUI() {
 
   const [attachments, setAttachments] = useState<{ file: File, preview: string }[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [audioVolume, setAudioVolume] = useState<number>(0);
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
@@ -45,7 +94,33 @@ export default function DeepWorkUI() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const recognitionRef = useRef<any>(null);
+  
+  // Custom Speech Media Refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const silenceIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const transcriptBufferRef = useRef('');
+  const lastSpeechTimeRef = useRef(0);
+  const isManualStopRef = useRef(false);
+  const hasSpokenRef = useRef(false);
+  const isCancelledRef = useRef(false);
+
+  const cancelVoice = () => {
+    isCancelledRef.current = true;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    setIsProcessingVoice(false);
+    setAudioVolume(0);
+  };
+
+  const acceptVoice = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+  };
 
   useEffect(() => {
     setGreeting(getCatchyGreeting());
@@ -185,40 +260,146 @@ export default function DeepWorkUI() {
   };
 
   const toggleSpeech = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return alert("Speech recognition not supported.");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return alert("Microphone access is not supported in this environment.");
+    }
 
     if (isRecording) {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      setIsRecording(false);
+      isManualStopRef.current = true;
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.continuous = false;
-    recognition.interimResults = true;
+    transcriptBufferRef.current = inputValue;
+    if (transcriptBufferRef.current && !transcriptBufferRef.current.endsWith(' ')) {
+      transcriptBufferRef.current += ' ';
+    }
+    
+    lastSpeechTimeRef.current = Date.now();
+    isManualStopRef.current = false;
+    hasSpokenRef.current = false;
+    isCancelledRef.current = false;
+    audioChunksRef.current = [];
 
-    let originalInput = inputValue;
-    if (originalInput && !originalInput.endsWith(' ')) originalInput += ' ';
+    const startRecording = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorderRef.current = mediaRecorder;
+        
+        // Setup Silence Detection via AudioContext
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = audioContext;
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+        
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-    recognition.onstart = () => setIsRecording(true);
-    recognition.onresult = (event: any) => {
-      let currentTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        currentTranscript += event.results[i][0].transcript;
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            audioChunksRef.current.push(e.data);
+          }
+        };
+
+        const cleanupAndTranscribe = async () => {
+           setIsRecording(false);
+           setAudioVolume(0);
+           if (silenceIntervalRef.current) clearInterval(silenceIntervalRef.current);
+           if (audioContextRef.current) {
+             audioContextRef.current.close().catch(()=>{});
+             audioContextRef.current = null;
+           }
+           stream.getTracks().forEach(track => track.stop());
+           
+           if (isCancelledRef.current) {
+             setInputValue(transcriptBufferRef.current);
+             return;
+           }
+
+           if (audioChunksRef.current.length === 0) return;
+           
+           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+           if (audioBlob.size < 1000) return; // Too short to matter
+
+           setIsProcessingVoice(true);
+
+           const formData = new FormData();
+           formData.append('file', audioBlob, 'audio.webm');
+           formData.append('model', 'whisper-large-v3-turbo');
+           formData.append('response_format', 'json');
+           formData.append('language', 'en');
+
+           try {
+             const res = await fetch('/api/whisper', {
+               method: 'POST',
+               body: formData
+             });
+             
+             if (!res.ok) throw new Error("Whisper API Error");
+             const data = await res.json();
+             
+             if (data.text) {
+               setInputValue(transcriptBufferRef.current + data.text);
+             } else {
+               setInputValue(transcriptBufferRef.current);
+             }
+            } catch (e) {
+              console.error(e);
+              setInputValue(transcriptBufferRef.current);
+              alert("Whisper Transcription Error: Could not connect to Groq.");
+           } finally {
+              setIsProcessingVoice(false);
+           }
+        };
+
+        mediaRecorder.onstop = () => {
+          cleanupAndTranscribe();
+        };
+
+        silenceIntervalRef.current = setInterval(() => {
+          if (isManualStopRef.current) {
+             if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+             return;
+          }
+
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+          const averageVolume = sum / dataArray.length;
+          setAudioVolume(averageVolume);
+          
+          if (averageVolume > 15) {
+            hasSpokenRef.current = true;
+            lastSpeechTimeRef.current = Date.now();
+          }
+
+          const timeSinceLast = Date.now() - lastSpeechTimeRef.current;
+          const limit = hasSpokenRef.current ? 4000 : 15000;
+          
+          if (timeSinceLast >= limit) {
+            if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+          }
+        }, 100);
+
+        mediaRecorder.start();
+        setIsRecording(true);
+      } catch (err) {
+        console.error("Microphone Error:", err);
+        alert("Microphone Error: Please grant microphone permissions.");
       }
-      setInputValue(originalInput + currentTranscript);
     };
-    recognition.onerror = () => setIsRecording(false);
-    recognition.onend = () => setIsRecording(false);
-
-    recognition.start();
+    
+    startRecording();
   };
 
   const handleSend = async () => {
-    if (isRecording && recognitionRef.current) {
-      recognitionRef.current.stop();
+    if (isRecording && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
       setIsRecording(false);
     }
     if (!inputValue.trim() && attachments.length === 0) return;
@@ -303,14 +484,13 @@ export default function DeepWorkUI() {
 
               if (parsed.type === 'trace') {
                 if (parsed.data.type === 'thought_stream') {
-                  // Direct native absolute stream update ensuring React immutability
                   updateActiveChatLogs(prev => {
                     const newLogs = [...prev];
                     const lastLog = newLogs[newLogs.length - 1];
                     if (lastLog && lastLog.type === 'thought_stream') {
-                      newLogs[newLogs.length - 1] = { ...lastLog, text: parsed.data.text };
+                      newLogs[newLogs.length - 1] = { ...lastLog, text: parsed.data.text, endTime: Date.now() };
                     } else {
-                      newLogs.push({ type: 'thought_stream', text: parsed.data.text });
+                      newLogs.push({ type: 'thought_stream', text: parsed.data.text, startTime: Date.now(), endTime: Date.now() });
                     }
                     return newLogs;
                   });
@@ -327,7 +507,7 @@ export default function DeepWorkUI() {
                   });
                   messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
                 } else {
-                  updateActiveChatLogs(prev => [...prev, parsed.data]);
+                  updateActiveChatLogs(prev => [...prev, { ...parsed.data, startTime: Date.now(), endTime: Date.now() }]);
                   messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
                 }
               } else if (parsed.type === 'done') {
@@ -392,11 +572,19 @@ export default function DeepWorkUI() {
       />
 
       <div className="flex-1 flex flex-col relative bg-transparent overflow-hidden z-10">
+        {/* Modern Fumes Background overlay */}
+        <div
+          className="absolute top-0 left-0 right-0 h-20 z-10 pointer-events-none"
+          style={{
+            background: 'linear-gradient(to bottom, #050505 0%, rgba(5,5,5,0.9) 30%, transparent 100%)'
+          }}
+        />
+
         {/* Absolute Header (Draggable Region for Electron) */}
-        <div className="absolute top-0 left-0 right-0 h-14 flex items-center justify-between pl-4 pr-[140px] z-20 bg-gradient-to-b from-[#050505] to-transparent pointer-events-none [-webkit-app-region:drag]">
-          <div className="flex items-center gap-2 pointer-events-auto [-webkit-app-region:no-drag]">
+        <div className="absolute top-0 left-0 right-0 h-14 flex items-center justify-between pl-4 pr-[140px] z-20 pointer-events-none [-webkit-app-region:drag]">
+          <div className="flex items-center gap-2 pointer-events-auto [-webkit-app-region:no-drag] h-full pt-3">
             {!sidebarOpen && (
-              <div className="flex items-center gap-1 mr-2">
+              <div className="flex items-center gap-1 mr-2 mt-0">
                 <Tooltip text="Open sidebar" side="bottom">
                   <div onClick={() => setSidebarOpen(true)} className="p-1.5 rounded-full hover:bg-white/10 active:bg-white/20 active:scale-95 transition-all text-[#8C8A88] hover:text-white cursor-pointer">
                     <PanelLeft className="w-[18px] h-[18px]" />
@@ -523,13 +711,17 @@ export default function DeepWorkUI() {
           setAttachments={setAttachments}
           greeting={greeting}
           traceLogsLength={traceLogs.length}
+          isProcessingVoice={isProcessingVoice}
+          audioVolume={audioVolume}
+          cancelVoice={cancelVoice}
+          acceptVoice={acceptVoice}
         />
 
         {/* Disclaimer Text exactly where user wanted it */}
         {traceLogs.length === 0 && !isThinking && (
           <div className="absolute bottom-6 left-0 right-0 flex flex-col items-center pointer-events-none z-40">
-            <div className="text-center text-[12px] text-black/80 font-semibold tracking-wide mix-blend-overlay">
-              EterX is an Agent and can make mistakes. Please double-check responses.
+            <div className="text-center text-[12px] text-black/60 font-medium tracking-wide mix-blend-overlay">
+              EterX is an AI agent and can make mistakes; please double-check its work.
             </div>
           </div>
         )}

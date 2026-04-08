@@ -92,7 +92,7 @@ export class SessionStateManager {
       // Check if session is expired (idle too long)
       const elapsed = Date.now() - (data.lastActivityAt || 0);
       if (elapsed > SESSION_TIMEOUT_MS) {
-        console.log(`[Session] ⏰ Session expired (${(elapsed / 60000).toFixed(1)} min idle). Starting fresh.`);
+        console.log(`[Session] ⏰ Session expired (${ (elapsed / 60000).toFixed(1) } min idle). Starting fresh.`);
         this.state = { ...EMPTY_STATE, createdAt: Date.now(), lastActivityAt: Date.now() };
         this.loaded = true;
         await this.save();
@@ -105,7 +105,7 @@ export class SessionStateManager {
       const absoluteAge = Date.now() - (data.createdAt || 0);
       const MAX_SESSION_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours absolute max
       if (absoluteAge > MAX_SESSION_AGE_MS) {
-        console.log(`[Session] 🕐 Session too old (${(absoluteAge / 60000).toFixed(1)} min absolute age). Starting fresh.`);
+        console.log(`[Session] 🕐 Session too old (${ (absoluteAge / 60000).toFixed(1) } min absolute age). Starting fresh.`);
         this.state = { ...EMPTY_STATE, createdAt: Date.now(), lastActivityAt: Date.now() };
         this.loaded = true;
         await this.save();
@@ -131,10 +131,10 @@ export class SessionStateManager {
       this.currentProjectId = data._projectId || null;
 
       const sessionAge = ((Date.now() - this.state.createdAt) / 60000).toFixed(1);
-      console.log(`[Session] ✅ Restored session (${sessionAge} min old, project: ${this.currentProjectId || 'unknown'}) — ${this.state.callHistory.length} calls, ${this.state.fileRecords.length} files tracked, ${this.state.loadedSkills.length} skills`);
+      console.log(`[Session] ✅ Restored session (${ sessionAge } min old, project: ${ this.currentProjectId || 'unknown' }) — ${ this.state.callHistory.length } calls, ${ this.state.fileRecords.length } files tracked, ${ this.state.loadedSkills.length } skills`);
       return true;
     } catch (err: any) {
-      console.warn(`[Session] ⚠️ Failed to load session: ${err.message}`);
+      console.warn(`[Session] ⚠️ Failed to load session: ${ err.message }`);
       this.state = { ...EMPTY_STATE, createdAt: Date.now(), lastActivityAt: Date.now() };
       this.loaded = true;
       return false;
@@ -148,16 +148,16 @@ export class SessionStateManager {
    */
   public async loadForProject(projectId: string): Promise<boolean> {
     const restored = await this.load();
-    
+
     // If the session was from a DIFFERENT project/conversation, reset it
     if (restored && this.currentProjectId && this.currentProjectId !== projectId) {
-      console.log(`[Session] 🔄 Project changed (${this.currentProjectId} → ${projectId}). Clearing stale session.`);
+      console.log(`[Session] 🔄 Project changed (${ this.currentProjectId } → ${ projectId }). Clearing stale session.`);
       this.state = { ...EMPTY_STATE, createdAt: Date.now(), lastActivityAt: Date.now() };
       this.currentProjectId = projectId;
       await this.save();
       return false;
     }
-    
+
     this.currentProjectId = projectId;
     return restored;
   }
@@ -177,7 +177,7 @@ export class SessionStateManager {
       // Save with _projectId metadata so loadForProject can detect project changes
       await fs.writeJson(STATE_FILE, { ...this.state, _projectId: this.currentProjectId }, { spaces: 2 });
     } catch (err: any) {
-      console.warn(`[Session] ⚠️ Failed to save session: ${err.message}`);
+      console.warn(`[Session] ⚠️ Failed to save session: ${ err.message }`);
     }
   }
 
@@ -314,21 +314,21 @@ export class SessionStateManager {
           } else {
             const head = lines.slice(0, 5).join('\n');
             const tail = lines.slice(-2).join('\n');
-            preview = `${head}\n... (${lineCount - 7} more lines) ...\n${tail}`;
+            preview = `${ head }\n... (${ lineCount - 7 } more lines) ...\n${ tail }`;
             if (preview.length > 400) preview = preview.substring(0, 400);
           }
 
-          reviews.push(`📄 ${record.filename} (${record.action}, ${lineCount} lines, ${sizeKB}KB):\n${preview}`);
+          reviews.push(`📄 ${ record.filename } (${ record.action }, ${ lineCount } lines, ${ sizeKB }KB):\n${ preview }`);
         } else {
-          reviews.push(`⚠️ ${record.filename} — file no longer exists`);
+          reviews.push(`⚠️ ${ record.filename } — file no longer exists`);
         }
       } catch {
-        reviews.push(`⚠️ ${record.filename} — could not read`);
+        reviews.push(`⚠️ ${ record.filename } — could not read`);
       }
     }
 
     return reviews.length > 0
-      ? `━━━ SELF-REVIEW: Your Previous Output ━━━\n${reviews.join('\n\n')}\n━━━ END REVIEW ━━━`
+      ? `━━━ SELF-REVIEW: Your Previous Output ━━━\n${ reviews.join('\n\n') }\n━━━ END REVIEW ━━━`
       : '';
   }
 
@@ -344,19 +344,19 @@ export class SessionStateManager {
     const parts: string[] = [];
 
     if (this.state.lastUserMessage) {
-      parts.push(`Previous task: "${this.state.lastUserMessage.substring(0, 120)}"`);
+      parts.push(`Previous task: "${ this.state.lastUserMessage.substring(0, 120) }"`);
     }
 
     // Rich file summary — shows what was created and what it contains
     if (this.state.fileRecords.length > 0) {
       const fileSummary = this.state.fileRecords.slice(-8).map(r =>
-        `  • ${r.filename} (${r.action}) — ${r.purpose || r.contentPreview || 'no description'}`
+        `  • ${ r.filename } (${ r.action }) — ${ r.purpose || r.contentPreview || 'no description' }`
       ).join('\n');
-      parts.push(`Files in this session:\n${fileSummary}`);
+      parts.push(`Files in this session:\n${ fileSummary }`);
     }
 
     if (this.state.loadedSkills.length > 0) {
-      parts.push(`Skills loaded: ${this.state.loadedSkills.join(', ')} (DO NOT reload)`);
+      parts.push(`Skills loaded: ${ this.state.loadedSkills.join(', ') } (DO NOT reload)`);
     }
 
     if (this.state.taskDecomposerUsed) {
@@ -368,21 +368,21 @@ export class SessionStateManager {
       const done = this.state.taskPlanSteps.filter(s => s.status === 'done').length;
       const total = this.state.taskPlanSteps.length;
       const pending = this.state.taskPlanSteps.filter(s => s.status === 'pending');
-      parts.push(`Task plan: ${done}/${total} steps done${pending.length > 0 ? `. Next: "${pending[0].name}"` : ' — ALL COMPLETE'}`);
+      parts.push(`Task plan: ${ done }/${ total } steps done${ pending.length > 0 ? `. Next: "${ pending[0].name }"` : ' — ALL COMPLETE' }`);
     }
 
     if (this.state.actionSummary.length > 0) {
       const recent = this.state.actionSummary.slice(-6);
-      parts.push(`Recent actions:\n${recent.map((a, i) => `  ${i + 1}. ${a}`).join('\n')}`);
+      parts.push(`Recent actions:\n${ recent.map((a, i) => `  ${ i + 1 }. ${ a }`).join('\n') }`);
     }
 
     // Brief mention of last output
     if (this.state.lastAgentOutput) {
-      parts.push(`Last output preview: "${this.state.lastAgentOutput.substring(0, 100)}..."`);
+      parts.push(`Last output preview: "${ this.state.lastAgentOutput.substring(0, 100) }..."`);
     }
 
     return parts.length > 0
-      ? `\n━━━ SESSION MEMORY ━━━\n${parts.join('\n')}\n\nIMPORTANT: If user says "work more", "add more", "continue" — enhance the FILES LISTED ABOVE. Use workspace_read_file to review them, then workspace_edit_file to improve. Do NOT recreate from scratch.\n━━━ END SESSION ━━━`
+      ? `\n━━━ SESSION MEMORY ━━━\n${ parts.join('\n') }\n\nIMPORTANT: If user says "work more", "add more", "continue" — enhance the FILES LISTED ABOVE. Use workspace_read_file to review them, then workspace_edit_file to improve. Do NOT recreate from scratch.\n━━━ END SESSION ━━━`
       : '';
   }
 

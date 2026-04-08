@@ -21,9 +21,19 @@ const WorkingWaveform = ({ color }: { color: string }) => (
   </div>
 );
 
-const getLogStyle = (text: string, type: string) => {
-  const t = text || '';
+const IconMap: Record<string, any> = {
+  Terminal, Search, Code, MessageSquare, Cpu, Sparkles, Check, FilePlus, FileEdit, FileSearch, FolderSearch, BookOpen, GitBranch, LayoutTemplate, MonitorPlay, Camera, Activity, Bell, FileText, Mail, Settings, Globe, FileArchive, Database, Link, Calculator, BarChart, Server, Youtube, Clipboard, Mic, Rss, Smartphone, ArrowRightLeft, FileJson, Hash, Settings2, Clock, Lock, RefreshCcw, Eye, PlayCircle, Split, Monitor
+};
+
+const getLogStyle = (text: string, type: string, iconName?: string) => {
   const iconProps = { className: "w-3.5 h-3.5 text-[#8C8A88]", strokeWidth: 2 };
+
+  if (iconName && IconMap[iconName]) {
+    const IconComponent = IconMap[iconName];
+    return <IconComponent {...iconProps} />;
+  }
+
+  const t = text || '';
 
   if (t === 'Running command' || t === 'Running project command') return <Terminal {...iconProps} />;
   if (t === 'Researching') return <Globe {...iconProps} />;
@@ -113,7 +123,7 @@ const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'm
   // Use refs to avoid stale closures in setInterval
   const revealedCountRef = useRef(0);
   const targetTextRef = useRef(targetText);
-  const [, forceRender] = useState(0); 
+  const [, forceRender] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevLengthRef = useRef(0);
 
@@ -237,6 +247,11 @@ export const ProfessionalThought = ({ text, isLatest, isThinking, variant = 'tho
   const renderText = useMemo(() => {
     if (!rawText) return rawText;
     let fixed = rawText;
+    
+    // aggressively scrub hallucinations mimicking system prompts
+    fixed = fixed.replace(/!\[.*?\]\(\/absolute.*?\.png\)/gi, '');
+    fixed = fixed.replace(/<\/?thought>/gi, '');
+    
     // Fix inline headings: any text immediately before # (with or without newline)
     fixed = fixed.replace(/([^\n])(#{1,6}\s)/g, '$1\n\n$2');
     // Fix headings after period/punctuation without blank line
@@ -247,7 +262,8 @@ export const ProfessionalThought = ({ text, isLatest, isThinking, variant = 'tho
     fixed = fixed.replace(/([.!?:])(\s*\n)?(\d+\.\s)/g, '$1\n\n$3');
     // Ensure blank line before headings that have just a single \n
     fixed = fixed.replace(/([^\n])\n(#{1,6}\s)/g, '$1\n\n$2');
-    return fixed;
+    
+    return fixed.trim();
   }, [rawText]);
 
   return (
@@ -263,46 +279,50 @@ export const ProfessionalThought = ({ text, isLatest, isThinking, variant = 'tho
         ...markdownComponents,
         p: ({ node, ...props }: any) => variant === 'answer'
           ? <p className="mb-4 last:mb-0 font-normal text-[15.5px]" {...props} />
-          : <span className="text-[#A3A19E] mr-1 inline-block mt-2 first:mt-0" {...props} />,
+          : <p className="text-[#A3A19E] mb-2 font-serif leading-relaxed break-words" {...props} />,
         strong: ({ node, ...props }: any) => variant === 'answer'
           ? <strong className="font-semibold text-[#E8E6E3]" {...props} />
-          : <span className="font-medium text-[#c4c2c0]" {...props} />,
+          : <strong className="font-semibold text-[#c4c2c0]" {...props} />,
         b: ({ node, ...props }: any) => variant === 'answer'
           ? <strong className="font-semibold text-[#E8E6E3]" {...props} />
-          : <span className="font-medium text-[#c4c2c0]" {...props} />,
+          : <strong className="font-semibold text-[#c4c2c0]" {...props} />,
         h1: ({ node, ...props }: any) => variant === 'answer'
           ? <h3 className="font-semibold mb-3 text-[20px] text-[#E8E6E3] mt-6" {...props} />
-          : <span className="text-[#8C8A88] font-medium mr-1 lowercase" {...props} />,
+          : <h3 className="text-[#8C8A88] font-bold mb-2 mt-4 text-[14px]" {...props} />,
         h2: ({ node, ...props }: any) => variant === 'answer'
           ? <h4 className="font-semibold mb-3 text-[18px] text-[#E8E6E3] mt-5" {...props} />
-          : <span className="text-[#8C8A88] font-medium mr-1 lowercase" {...props} />,
+          : <h4 className="text-[#8C8A88] font-bold mb-2 mt-3 text-[13px]" {...props} />,
         h3: ({ node, ...props }: any) => variant === 'answer'
           ? <h5 className="font-semibold mb-2 text-[16px] text-[#E8E6E3] mt-4" {...props} />
-          : <span className="text-[#8C8A88] font-medium mr-1 lowercase" {...props} />,
+          : <h5 className="text-[#8C8A88] font-bold mb-1 mt-2 text-[12px]" {...props} />,
         ul: ({ node, ...props }: any) => variant === 'answer'
           ? <ul className="list-none mb-4 space-y-2.5 ml-0" {...props} />
-          : <span className="text-[#A3A19E] mr-1 inline" {...props} />,
+          : <ul className="list-disc mb-3 space-y-1 ml-4 text-[#A3A19E]" {...props} />,
         ol: ({ node, ...props }: any) => variant === 'answer'
           ? <ol className="list-decimal pl-6 mb-4 space-y-1.5 marker:text-[#8C8A88]" {...props} />
-          : <span className="text-[#A3A19E] mr-1 inline" {...props} />,
+          : <ol className="list-decimal pl-5 mb-3 space-y-1 text-[#A3A19E] marker:text-[#8C8A88]" {...props} />,
         li: ({ node, ...props }: any) => variant === 'answer'
           ? (
             <li className="flex items-start">
               <span className="mr-3 text-[#555350] mt-[5px] text-[10px]">●</span>
-              <span className="flex-1" {...props} />
+              <span className="flex-1 break-words" {...props} />
             </li>
           )
-          : <span className="text-[#A3A19E] mr-1 inline" {...props} />,
+          : <li className="pl-1 break-words" {...props} />,
         blockquote: ({ node, ...props }: any) => variant === 'answer'
           ? <blockquote className="border-l-[3px] border-[#E2765A]/50 bg-[#2A2927] py-2 px-4 italic text-[#A3A19E] my-4 rounded-r-lg" {...props} />
-          : <span className="text-[#8C8A88] italic inline-block ml-2" {...props} />,
+          : <blockquote className="border-l-2 border-[#555350] pl-3 italic text-[#8C8A88] my-3" {...props} />,
         table: ({ node, ...props }: any) => variant === 'answer'
           ? (
             <div className="my-5 overflow-x-auto rounded-xl border border-white/10 shadow-sm">
               <table className="w-full border-collapse text-[14px]" {...props} />
             </div>
           )
-          : <span className="text-[#A3A19E]" {...props} />,
+          : (
+            <div className="my-3 overflow-x-auto overflow-y-hidden rounded border border-white/5">
+              <table className="w-full border-collapse text-[12px] text-[#A3A19E]" {...props} />
+            </div>
+          ),
         thead: ({ node, ...props }: any) => <thead className="bg-[#1C1B1A]" {...props} />,
         th: ({ node, ...props }: any) => <th className="border border-white/5 px-4 py-2 text-left font-bold text-[#E8E6E3]" {...props} />,
         td: ({ node, ...props }: any) => <td className="border border-white/5 px-4 py-2 text-[#D2D0CD]" {...props} />,
@@ -373,60 +393,33 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
     autoScrollEnabled.current = isAtBottom;
   };
 
+  const getDurationString = () => {
+    if (flowLogs.length === 0) return '';
+    const start = flowLogs[0].startTime;
+    const end = flowLogs[flowLogs.length - 1].endTime;
+    if (!start || !end) return '';
+    const seconds = ((end - start) / 1000);
+    if (seconds < 2) return '';
+    if (seconds > 60) return `${Math.floor(seconds / 60)}m ${(seconds % 60).toFixed(0)}s`;
+    return `${seconds.toFixed(1)}s`;
+  };
+
   const getDynamicThoughtHeading = () => {
     const mainLogs = flowLogs.filter(l => !l.subAgent);
+    const duration = getDurationString();
+    const timeStr = duration && !isThinking ? ` for ${duration}` : '';
 
     // If the latest log is a tool execution from the MAIN agent, vividly display it
     const lastLog = mainLogs[mainLogs.length - 1];
     if (lastLog && lastLog.type !== 'thought_stream') {
       if (lastLog.text?.includes('Spawning')) return 'Orchestrating agents...';
+      if (!isThinking) return `Agent task completed${timeStr}`;
       return lastLog.text + '...';
     }
 
-    const thoughtLogs = mainLogs.filter(l => l.type === 'thought_stream');
-    let prominentHeading = '';
-
-    for (let i = thoughtLogs.length - 1; i >= 0; i--) {
-      const text = thoughtLogs[i].text;
-      const lines = text.split(/[\r\n]+/).filter((l: string) => l.trim().length > 0);
-
-      // Scan backwards to ensure we grab the absolute LATEST thought heading
-      for (let j = lines.length - 1; j >= 0; j--) {
-        const line = lines[j].trim();
-
-        // 1. Check for explicit Markdown headers or bold full lines
-        const headingMatch = line.match(/^(?:#+\s+|\*\*)([^\n*]+)(?:\*\*)?$/);
-        if (headingMatch && headingMatch[1].trim().length > 0 && headingMatch[1].trim().length < 65) {
-          prominentHeading = headingMatch[1].trim();
-          break;
-        }
-
-        // 2. Check for inferred implicit headings (short lines without punctuation)
-        if (line.length > 3 && line.length < 55 && !/[.!?:]$/.test(line)) {
-          if (/[a-zA-Z]/.test(line)) {
-            prominentHeading = line.replace(/^\*\*|\*\*$/g, '').replace(/^#+\s+/, '').trim();
-            break;
-          }
-        }
-      }
-
-      if (prominentHeading) break;
-    }
-
-    if (prominentHeading) return prominentHeading;
-
-    // Fallback: get the last trailing sentence
-    const lastThoughtLog = thoughtLogs[thoughtLogs.length - 1];
-    if (lastThoughtLog && lastThoughtLog.text) {
-      const textLine = lastThoughtLog.text.replace(/[\r\n]+/g, ' ').trim();
-      const chunks = textLine.split(/(?<=[.!?])\s+/).filter((c: string) => c.trim().length > 2);
-      const latestChunk = chunks[chunks.length - 1] || textLine;
-      if (latestChunk.length > 0) {
-        return latestChunk.length > 60 ? latestChunk.substring(0, 60) + "..." : latestChunk;
-      }
-    }
-
-    return isThinking ? 'Deep reasoning underway...' : 'Knowledge analysis finalized';
+    if (isThinking) return 'Deep reasoning...';
+    
+    return mainLogs.length > 1 ? `Agent task completed${timeStr}` : `Knowledge analysis finalized${timeStr}`;
   };
 
   const activitySummary = getDynamicThoughtHeading();
@@ -645,7 +638,7 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
 
                     if (isThought) {
                       return (
-                        <div key={idx} className="w-full pl-1 break-words whitespace-pre-wrap">
+                        <div key={idx} className="w-full pl-1 break-words">
                           <ProfessionalThought text={log.text} isLatest={isLast && idx === activeLogs.length - 1} isThinking={isThinking} />
                         </div>
                       );
@@ -673,6 +666,10 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
                       );
                     }
 
+                    const nextLog = activeLogs[idx + 1];
+                    const endTime = nextLog ? nextLog.startTime : (isThinking ? Date.now() : log.endTime);
+                    const seconds = endTime && log.startTime ? ((endTime - log.startTime) / 1000) : 0;
+
                     return (
                       <motion.div
                         key={idx}
@@ -687,7 +684,7 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
                         } : { duration: 0 }}
                         className="flex items-center gap-3.5 py-2.5 bg-[#111111] hover:bg-[#1A1A1A] border border-white/[0.08] rounded-xl px-4 w-max transition-colors max-w-full shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
                       >
-                        {getLogStyle(log.text, log.type)}
+                        {getLogStyle(log.text, log.type, log.icon)}
                         <div className="flex items-baseline gap-[14px] overflow-hidden truncate">
                           <span className="text-[14px] font-semibold text-[#F5F5F3] shrink-0 tracking-wide">{log.text}</span>
                           {log.secondary && (
@@ -699,6 +696,11 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
                             >
                               {log.secondary}
                             </motion.span>
+                          )}
+                          {seconds > 1 && (
+                            <span className="text-[11.5px] text-[#8C8A88]/60 font-mono italic ml-2 shrink-0">
+                              {seconds.toFixed(1)}s
+                            </span>
                           )}
                         </div>
                       </motion.div>

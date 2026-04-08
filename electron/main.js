@@ -1,7 +1,23 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// Attempt to read Google API Key from Next.js local environment variables to unlock Chromium's Speech Engine
+try {
+  const envPath = path.join(__dirname, '../.env.local');
+  if (fs.existsSync(envPath)) {
+    const envFile = fs.readFileSync(envPath, 'utf8');
+    const match = envFile.match(/VITE_SEARCH_API_KEY_1=([^\n\r]+)/) || envFile.match(/GEMINI_API_KEY_1=([^\n\r]+)/) || envFile.match(/VITE_API_KEY=([^\n\r]+)/);
+    if (match && match[1]) {
+      process.env.GOOGLE_API_KEY = match[1].trim();
+      process.env.GOOGLE_DEFAULT_CLIENT_ID = 'electron-dummy';
+      process.env.GOOGLE_DEFAULT_CLIENT_SECRET = 'electron-dummy';
+    }
+  }
+} catch (e) {
+  console.warn('Could not inject Google API key for Web Speech:', e);
+}
+
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 app.setName('EterX');
 app.setAppUserModelId('com.eterx.desktop');
 
@@ -67,7 +83,28 @@ ipcMain.handle('list-folder', async (event, folderPath) => {
   } catch { return []; }
 });
 
-app.on('ready', createWindow);
+app.on('ready', () => {
+  const { session } = require('electron');
+  
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    const allowedPermissions = ['media', 'microphone', 'audioCapture'];
+    if (allowedPermissions.includes(permission)) {
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    const allowedPermissions = ['media', 'microphone', 'audioCapture'];
+    if (allowedPermissions.includes(permission)) {
+      return true;
+    }
+    return false;
+  });
+
+  createWindow();
+});
 
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') {

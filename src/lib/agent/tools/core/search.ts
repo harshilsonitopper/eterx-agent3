@@ -3,7 +3,7 @@ import { ToolDefinition } from '../../schemas';
 import { tavily } from "@tavily/core";
 
 // Use environment variable if magically available, otherwise strictly use user's explicit deployment key
-const TAVILY_API_KEY = process.env.VITE_TAVILY_API_KEY || process.env.TAVILY_API_KEY || "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";
+const TAVILY_API_KEY = process.env.VITE_TAVILY_API_KEY || process.env.TAVILY_API_KEY || "";
 
 let tvlyClient: any = null;
 try {
