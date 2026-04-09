@@ -233,8 +233,8 @@ export class SessionStateManager {
 
   /** Store the agent's final answer so it can review its own output. */
   public setLastAgentOutput(output: string): void {
-    // Keep only last 500 chars to prevent bloat — enough to understand what was done
-    this.state.lastAgentOutput = output.substring(0, 500);
+    // Keep last 1500 chars for meaningful context on follow-up messages
+    this.state.lastAgentOutput = output.substring(0, 1500);
   }
 
   /** Get the agent's last output. */

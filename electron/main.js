@@ -64,6 +64,16 @@ ipcMain.handle('select-folder', async () => {
   return result.filePaths[0];
 });
 
+// IPC: Native files dialog
+ipcMain.handle('select-files', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    title: 'Select Files to Pin'
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths;
+});
+
 // IPC: List folder contents for browsing
 ipcMain.handle('list-folder', async (event, folderPath) => {
   try {

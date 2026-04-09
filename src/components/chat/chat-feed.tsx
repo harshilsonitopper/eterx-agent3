@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Copy, RefreshCw, ChevronDown, ChevronUp, FileText } from 'lucide-react';
 import { ThinkingProcess, ProfessionalThought } from '../chat/thought-sequence';
 import { AskUserPrompt } from '../chat/ask-user-prompt';
 import { Tooltip } from '../ui/tooltip';
@@ -123,8 +123,34 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             if (first.type === 'user_action') {
               return (
                 <div key={`group-${ groupIdx }`} id={`message-${ groupIdx }`} className="mt-10 mb-6 flex flex-col items-end w-full group/user scroll-m-20">
-                  <div className="bg-[#2A2A2A] text-[#E8E6E3] px-5 py-3.5 rounded-[24px] rounded-tr-[8px] ml-auto max-w-[85%] text-[15.5px] shadow-[0_4px_20px_rgba(0,0,0,0.2)] leading-relaxed whitespace-pre-wrap relative border border-white/5 select-text selection:bg-[#E2765A]/30">
-                    {first.text}
+                  <div className="bg-[#2A2A2A] text-[#E8E6E3] px-5 py-3.5 rounded-[24px] rounded-tr-[8px] ml-auto max-w-[85%] text-[15.5px] shadow-[0_4px_20px_rgba(0,0,0,0.2)] leading-relaxed whitespace-pre-wrap relative border border-white/5 select-text selection:bg-[#E2765A]/30 flex flex-col items-end">
+                    {first.attachments && first.attachments.length > 0 && (
+                      <div className="flex flex-wrap justify-end gap-2.5 mb-3 w-full">
+                        {first.attachments.map((att: any, i: number) => {
+                          const isImage = !!att.preview;
+                          const extension = att.file.name.split('.').pop()?.toUpperCase() || 'FILE';
+                          const isPdf = extension === 'PDF';
+                          
+                          if (isImage) {
+                            return (
+                              <a key={i} href={att.preview} target="_blank" rel="noopener noreferrer" className="relative group w-[72px] h-[72px] rounded-[16px] shadow-sm hover:shadow-md transition-all cursor-pointer border border-white/10 shrink-0">
+                                <img src={att.preview} alt="attached" className="w-full h-full object-cover rounded-[16px] hover:opacity-80 transition-opacity" />
+                              </a>
+                            );
+                          }
+
+                          return (
+                            <div key={i} className="flex flex-col items-center justify-center gap-1.5 w-[72px] h-[72px] rounded-[16px] bg-[#1A1A1A] border border-white/10 shadow-sm shrink-0">
+                              <div className={`w-[26px] h-[26px] rounded-md flex items-center justify-center shrink-0 shadow-sm ${isPdf ? 'bg-[#EF4444]' : 'bg-[#007AFF]'}`}>
+                                <FileText className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+                              </div>
+                              <span className="text-[10px] font-medium text-[#E8E6E3] truncate max-w-[90%] px-1">{extension}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <span className="w-full text-left">{first.text}</span>
                     <div className="absolute -bottom-8 right-0 flex items-center gap-1 opacity-0 group-hover/user:opacity-100 transition-opacity duration-200 pointer-events-none group-hover/user:pointer-events-auto">
                       <Tooltip text="Copy message">
                         <button onClick={() => navigator.clipboard.writeText(first.text)} className="p-1.5 text-[#8C8A88] hover:text-[#E8E6E3] bg-white/5 hover:bg-white/10 rounded-md transition-all border border-white/5 backdrop-blur-sm">
@@ -150,8 +176,10 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
               finalAnswer = { type: 'answer', text: answerIndices.map(i => group[i].text).join('\n\n') };
               tailLogs = group.slice(lastIdx + 1).filter(l => l.type !== 'answer');
             } else {
+              // Only treat 'thought' type (not 'thought_stream') as a potential final answer
               const lastThoughtIdx = [...group].reverse().findIndex(l => l.type === 'thought');
               const actualLastThoughtIdx = lastThoughtIdx === -1 ? -1 : group.length - 1 - lastThoughtIdx;
+              // Everything except the final 'thought' goes into processLogs (including thought_stream)
               processLogs = actualLastThoughtIdx === -1 ? group : group.slice(0, actualLastThoughtIdx);
               finalAnswer = actualLastThoughtIdx === -1 ? null : group[actualLastThoughtIdx];
               tailLogs = actualLastThoughtIdx === -1 ? [] : group.slice(actualLastThoughtIdx + 1);

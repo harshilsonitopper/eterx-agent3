@@ -62,6 +62,21 @@ export class GeminiAgentClient {
   }
 
   /**
+   * Switch between Think (deep reasoning) and Fast (quick response) modes.
+   * Think = gemma-4-31b-it, Fast = gemma-4-26b-it
+   */
+  public setMode(mode: 'think' | 'fast'): void {
+    if (mode === 'fast') {
+      this.modelName = 'gemma-4-26b-a4b-it';
+      this.fallbackModel = 'gemma-4-26b-a4b-it';
+    } else {
+      this.modelName = 'gemma-4-31b-it';
+      this.fallbackModel = 'gemma-4-31b-it';
+    }
+    console.log(`[GeminiClient] 🎛️ Mode: ${ mode.toUpperCase() } → Model: ${ this.modelName }`);
+  }
+
+  /**
    * Converts our Zod-based tool schemas into Gemini's function declaration format.
    */
   private cleanSchemaStructure(obj: any): any {
@@ -511,6 +526,14 @@ You have ${ toolCount } tools. Use them like a pro:
 - DO NOT narrate your plan in thinking. Just decide and act.
 - When sub-agents are running, CONTINUE YOUR OWN WORK on other parts of the task. Don't idle.
 
+━━━ CHAT MEMORY PROTOCOL (CRITICAL) ━━━
+You receive conversation history (previous user messages + your answers) as context.
+⚠️ The LAST user message in the conversation is your CURRENT task. Everything before it is BACKGROUND CONTEXT.
+- Use history to understand what the user has already asked and what you've already done.
+- But ONLY execute what the LATEST message asks for. Do NOT re-answer old questions.
+- If the latest message references something from history (e.g. "fix that", "the same one"), resolve it from context.
+- NEVER confuse a previous answer with the current task.
+
 ━━━ CONVERSATION INTELLIGENCE (CRITICAL — READ THIS) ━━━
 The user often sends SHORT follow-up messages. You MUST handle them correctly:
 
@@ -809,22 +832,23 @@ PROMPT TIPS for image_generator:
 Project: ${ context.projectId }
 Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }${ errorContext }${ dynamicContext ? '\n\n' + dynamicContext : '' }`.trim();
   }
-
-  /**
-   * The core execution loop with key rotation.
-   */
+/**
+ * The core execution loop with key rotation.
+ */
   public async executeMessageLoop(
     context: ProjectContext,
     message: string,
     history: any[] = [],
-    onTrace?: (t: any) => void
+    onTrace?: (t: any) => void,
+    mediaFiles: { path: string, mimeType: string }[] = [],
+    imageBackupParts: any[] = []
   ): Promise<{ text: string, trace: any[] }> {
     let attempts = 0;
     const maxAttempts = 99999; // Practically infinite retries
 
     while (attempts < maxAttempts) {
       try {
-        return await this.runReActLoop(context, message, history, onTrace);
+        return await this.runReActLoop(context, message, history, onTrace, mediaFiles, imageBackupParts);
       } catch (error: any) {
         const errorMsg = error.message?.toLowerCase() || '';
 
@@ -984,7 +1008,9 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     context: ProjectContext,
     message: string,
     history: any[] = [],
-    onTrace?: (t: any) => void
+    onTrace?: (t: any) => void,
+    mediaFiles: { path: string, mimeType: string }[] = [],
+    imageBackupParts: any[] = []
   ): Promise<{ text: string, trace: any[] }> {
     console.log(`[GeminiClient] Sending objective to Gemini: "${ message }"`);
 
@@ -993,18 +1019,23 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     // === SESSION CONTINUITY: Hydrate from previous messages ===
     const sessionHydrated = globalSessionManager.hasActiveSession();
     const sessionState = globalSessionManager.hydrate();
-    const callHistory = sessionHydrated ? sessionState.callHistory : new Set<string>();
-    const toolCallCounts = sessionHydrated ? sessionState.toolCallCounts : new Map<string, number>();
-    const categoryCallCounts = sessionHydrated ? sessionState.categoryCallCounts : new Map<string, number>();
+    // Keep persistent state (skills, files) but reset per-message dedup state
+    // so the agent can re-use tools like web_search across different messages
+    const callHistory = new Set<string>(); // Fresh dedup per message
+    const toolCallCounts = new Map<string, number>(); // Fresh counts per message
+    const categoryCallCounts = new Map<string, number>(); // Fresh counts per message
     const loadedSkills = sessionHydrated ? sessionState.loadedSkills : new Set<string>();
     const writtenFiles = sessionHydrated ? sessionState.writtenFiles : new Set<string>();
     let interactions = 0;
     let noToolCallStreak = 0;
-    let taskDecomposerUsed = sessionHydrated ? sessionState.taskDecomposerUsed : false;
+    let taskDecomposerUsed = false; // Fresh per message — allowed once per user request
 
     if (sessionHydrated) {
       console.log(`[GeminiClient] 🔄 Session restored: ${ callHistory.size } calls, ${ writtenFiles.size } files, ${ loadedSkills.size } skills, decomposer=${ taskDecomposerUsed }`);
     }
+
+    // Clear stale cache from previous messages so fresh results are always used
+    intelligentCache.clear();
 
     // Category definitions for rate limiting
     const toolCategories: Record<string, string> = {
@@ -1062,13 +1093,52 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     if (knowledgeContext) intelligenceSignals.push(knowledgeContext);
 
     // Build the contents array — this is our conversation history
-    // USER MESSAGE STAYS CLEAN — no enrichment in the message itself to prevent
-    // memory compounding across loop iterations and follow-up messages.
-    // Session + intelligence context goes into the system prompt (regenerated each iteration).
-    let contents: any[] = [
-      ...history,
-      { role: 'user', parts: [{ text: message }] }
-    ];
+    let contents: any[] = [...history];
+
+    // Build the user parts incorporating media references
+    // STRATEGY: 
+    //   - Images → inline base64 (always works, no API key mismatch)
+    //   - PDFs/other → files.upload via THIS client (same key = no 403)
+    let initialUserParts: any[] = [];
+
+    // First: inject inline base64 image backups (most reliable for images)
+    if (imageBackupParts && imageBackupParts.length > 0) {
+      console.log(`[GeminiClient] 🖼️ Injecting ${imageBackupParts.length} inline image(s)`);
+      initialUserParts.push(...imageBackupParts);
+    }
+
+    // Then: handle remaining media files (PDFs, etc.) via files.upload using THIS client
+    if (mediaFiles && mediaFiles.length > 0) {
+      for (const meta of mediaFiles) {
+        // Skip images — already handled via inline base64 above
+        if (meta.mimeType.startsWith('image/')) continue;
+
+        // For PDFs and other files, upload via THIS client (same API key = no 403)
+        try {
+          if (onTrace) onTrace({ type: 'progress', text: 'Processing document...', percent: 5 });
+          const fs = require('fs');
+          if (!fs.existsSync(meta.path)) {
+            console.warn(`[GeminiClient] ⚠️ File not found: ${meta.path}`);
+            continue;
+          }
+          const uploadedMedia = await this.ai.files.upload({
+            file: meta.path,
+            config: { mimeType: meta.mimeType || 'application/octet-stream' }
+          });
+          if (uploadedMedia && uploadedMedia.uri) {
+            initialUserParts.push({ fileData: { fileUri: uploadedMedia.uri, mimeType: uploadedMedia.mimeType } });
+            console.log(`[GeminiClient] 📄 Document uploaded: ${uploadedMedia.name} (${uploadedMedia.mimeType})`);
+          }
+        } catch (err: any) {
+          console.warn(`[GeminiClient] ⚠️ Upload failed for ${meta.path}: ${err.message?.substring(0, 120)}`);
+          // Non-fatal — text content was already injected in the enriched prompt
+        }
+      }
+    }
+
+    initialUserParts.push({ text: message });
+
+    contents.push({ role: 'user', parts: initialUserParts });
 
     // === BUILD DYNAMIC CONTEXT FOR SYSTEM PROMPT ===
     // This goes into the system prompt (regenerated per-call, NOT stored in history)

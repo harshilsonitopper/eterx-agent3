@@ -71,6 +71,13 @@ const getCatchyGreeting = () => {
   return nightGreetings[Math.floor(Math.random() * nightGreetings.length)];
 };
 
+export interface PinnedItem {
+  id: string;
+  type: 'file' | 'folder';
+  path: string;
+  name: string;
+}
+
 export default function DeepWorkUI() {
   const [inputValue, setInputValue] = useState("");
   const [isThinking, setIsThinking] = useState(false);
@@ -91,10 +98,12 @@ export default function DeepWorkUI() {
   const [headerSearchOpen, setHeaderSearchOpen] = useState(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState("");
   const [activeView, setActiveView] = useState<'chat' | 'code'>('chat');
+  const [agentMode, setAgentMode] = useState<'think' | 'fast'>('think');
+  const [pinnedItems, setPinnedItems] = useState<PinnedItem[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  
+
   // Custom Speech Media Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
@@ -255,6 +264,8 @@ export default function DeepWorkUI() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    // Signal backend to stop the agent loop + all sub-agents
+    fetch('/api/agent/stop', { method: 'POST' }).catch(() => {});
     setIsThinking(false);
     updateActiveChatLogs(prev => [...prev, { type: 'thought', text: "\n\n*Generation stopped by user.*" }]);
   };
@@ -276,7 +287,7 @@ export default function DeepWorkUI() {
     if (transcriptBufferRef.current && !transcriptBufferRef.current.endsWith(' ')) {
       transcriptBufferRef.current += ' ';
     }
-    
+
     lastSpeechTimeRef.current = Date.now();
     isManualStopRef.current = false;
     hasSpokenRef.current = false;
@@ -286,10 +297,10 @@ export default function DeepWorkUI() {
     const startRecording = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
+
         const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         mediaRecorderRef.current = mediaRecorder;
-        
+
         // Setup Silence Detection via AudioContext
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         audioContextRef.current = audioContext;
@@ -297,7 +308,7 @@ export default function DeepWorkUI() {
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 512;
         source.connect(analyser);
-        
+
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         mediaRecorder.ondataavailable = (e) => {
@@ -307,54 +318,54 @@ export default function DeepWorkUI() {
         };
 
         const cleanupAndTranscribe = async () => {
-           setIsRecording(false);
-           setAudioVolume(0);
-           if (silenceIntervalRef.current) clearInterval(silenceIntervalRef.current);
-           if (audioContextRef.current) {
-             audioContextRef.current.close().catch(()=>{});
-             audioContextRef.current = null;
-           }
-           stream.getTracks().forEach(track => track.stop());
-           
-           if (isCancelledRef.current) {
-             setInputValue(transcriptBufferRef.current);
-             return;
-           }
+          setIsRecording(false);
+          setAudioVolume(0);
+          if (silenceIntervalRef.current) clearInterval(silenceIntervalRef.current);
+          if (audioContextRef.current) {
+            audioContextRef.current.close().catch(() => { });
+            audioContextRef.current = null;
+          }
+          stream.getTracks().forEach(track => track.stop());
 
-           if (audioChunksRef.current.length === 0) return;
-           
-           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-           if (audioBlob.size < 1000) return; // Too short to matter
+          if (isCancelledRef.current) {
+            setInputValue(transcriptBufferRef.current);
+            return;
+          }
 
-           setIsProcessingVoice(true);
+          if (audioChunksRef.current.length === 0) return;
 
-           const formData = new FormData();
-           formData.append('file', audioBlob, 'audio.webm');
-           formData.append('model', 'whisper-large-v3-turbo');
-           formData.append('response_format', 'json');
-           formData.append('language', 'en');
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          if (audioBlob.size < 1000) return; // Too short to matter
 
-           try {
-             const res = await fetch('/api/whisper', {
-               method: 'POST',
-               body: formData
-             });
-             
-             if (!res.ok) throw new Error("Whisper API Error");
-             const data = await res.json();
-             
-             if (data.text) {
-               setInputValue(transcriptBufferRef.current + data.text);
-             } else {
-               setInputValue(transcriptBufferRef.current);
-             }
-            } catch (e) {
-              console.error(e);
+          setIsProcessingVoice(true);
+
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'audio.webm');
+          formData.append('model', 'whisper-large-v3-turbo');
+          formData.append('response_format', 'json');
+          formData.append('language', 'en');
+
+          try {
+            const res = await fetch('/api/whisper', {
+              method: 'POST',
+              body: formData
+            });
+
+            if (!res.ok) throw new Error("Whisper API Error");
+            const data = await res.json();
+
+            if (data.text) {
+              setInputValue(transcriptBufferRef.current + data.text);
+            } else {
               setInputValue(transcriptBufferRef.current);
-              alert("Whisper Transcription Error: Could not connect to Groq.");
-           } finally {
-              setIsProcessingVoice(false);
-           }
+            }
+          } catch (e) {
+            console.error(e);
+            setInputValue(transcriptBufferRef.current);
+            alert("Whisper Transcription Error: Could not connect to Groq.");
+          } finally {
+            setIsProcessingVoice(false);
+          }
         };
 
         mediaRecorder.onstop = () => {
@@ -363,8 +374,8 @@ export default function DeepWorkUI() {
 
         silenceIntervalRef.current = setInterval(() => {
           if (isManualStopRef.current) {
-             if (mediaRecorder.state === 'recording') mediaRecorder.stop();
-             return;
+            if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+            return;
           }
 
           analyser.getByteFrequencyData(dataArray);
@@ -372,7 +383,7 @@ export default function DeepWorkUI() {
           for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
           const averageVolume = sum / dataArray.length;
           setAudioVolume(averageVolume);
-          
+
           if (averageVolume > 15) {
             hasSpokenRef.current = true;
             lastSpeechTimeRef.current = Date.now();
@@ -380,7 +391,7 @@ export default function DeepWorkUI() {
 
           const timeSinceLast = Date.now() - lastSpeechTimeRef.current;
           const limit = hasSpokenRef.current ? 4000 : 15000;
-          
+
           if (timeSinceLast >= limit) {
             if (mediaRecorder.state === 'recording') mediaRecorder.stop();
           }
@@ -393,7 +404,7 @@ export default function DeepWorkUI() {
         alert("Microphone Error: Please grant microphone permissions.");
       }
     };
-    
+
     startRecording();
   };
 
@@ -406,9 +417,19 @@ export default function DeepWorkUI() {
     if (isThinking) return;
 
     const prompt = inputValue || "Processing attached files...";
+    const currentAttachments = [...attachments];
     setInputValue("");
     setIsThinking(true);
     setAttachments([]);
+
+    // Use pre-uploaded media data from background uploads (already done when attached)
+    const mediaAttachments: any[] = currentAttachments.map(att => ({
+      name: att.file.name,
+      path: (att as any).localPath || (att.file as any).path || undefined,
+      mimeType: att.file.type || 'application/octet-stream',
+      fileUri: (att as any).fileUri || undefined,
+      inlineData: (att as any).inlineData || undefined,
+    }));
 
     let chatIdToUse = activeChatId;
     if (!chatIdToUse) {
@@ -419,7 +440,7 @@ export default function DeepWorkUI() {
         id: chatIdToUse,
         title: "New chat",
         updatedAt: Date.now(),
-        traceLogs: [{ type: 'user_action', text: prompt }]
+        traceLogs: [{ type: 'user_action', text: prompt, attachments: currentAttachments }]
       };
 
       setChats(prev => {
@@ -427,12 +448,12 @@ export default function DeepWorkUI() {
         localStorage.setItem('eterx_chats', JSON.stringify(updated));
         return updated;
       });
-      setTraceLogs([{ type: 'user_action', text: prompt }]);
+      setTraceLogs([{ type: 'user_action', text: prompt, attachments: currentAttachments }]);
 
       // Initial parallel naming
       generateTitle(chatIdToUse, [{ role: 'user', parts: [{ text: prompt }] }], "New chat");
     } else {
-      const updatedLogs = updateActiveChatLogs(prev => [...prev, { type: 'user_action', text: prompt }]);
+      const updatedLogs = updateActiveChatLogs(prev => [...prev, { type: 'user_action', text: prompt, attachments: currentAttachments }]);
 
       // Adaptive renaming logic (every 5 messages)
       const userMessageCount = updatedLogs.filter(l => l.type === 'user_action').length;
@@ -450,7 +471,7 @@ export default function DeepWorkUI() {
     if (window.innerWidth < 768) setSidebarOpen(false);
 
     const chatHistory = traceLogs
-      .filter(log => log.type === 'user_action' || log.type === 'thought')
+      .filter(log => log.type === 'user_action' || log.type === 'answer')
       .map(log => ({
         role: log.type === 'user_action' ? 'user' : 'model',
         parts: [{ text: log.text }]
@@ -463,7 +484,15 @@ export default function DeepWorkUI() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, history: chatHistory, userId: 'default', projectId: chatIdToUse }),
+        body: JSON.stringify({ 
+          prompt, 
+          history: chatHistory, 
+          mediaAttachments,
+          userId: 'default', 
+          projectId: chatIdToUse, 
+          mode: agentMode, 
+          pinnedContext: pinnedItems.length > 0 ? { paths: pinnedItems.map(p => p.path) } : null 
+        }),
         signal: controller.signal
       });
 
@@ -471,16 +500,22 @@ export default function DeepWorkUI() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let sseBuffer = ''; // Accumulate partial chunks across read() boundaries
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
-        const chunks = decoder.decode(value).split('\n\n').filter(Boolean);
-        for (const chunk of chunks) {
-          if (chunk.trim() && chunk.startsWith('data:')) {
-            try {
-              const parsed = JSON.parse(chunk.replace(/^data:\s*/, ''));
+        sseBuffer += decoder.decode(value, { stream: true });
+        const messages = sseBuffer.split('\n\n');
+        // Keep the last part — it might be incomplete
+        sseBuffer = messages.pop() || '';
+
+        for (const chunk of messages) {
+          const trimmed = chunk.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          try {
+              const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
 
               if (parsed.type === 'trace') {
                 if (parsed.data.type === 'thought_stream') {
@@ -497,7 +532,17 @@ export default function DeepWorkUI() {
                 } else if (parsed.data.type === 'answer') {
                   updateActiveChatLogs(prev => {
                     const newLogs = [...prev];
-                    const answerIdx = newLogs.findLastIndex(l => l.type === 'answer');
+
+                    // Bounded backward scan to prevent editing legacy answers from previous turns
+                    let answerIdx = -1;
+                    for (let i = newLogs.length - 1; i >= 0; i--) {
+                      if (newLogs[i].type === 'user_action') break;
+                      if (newLogs[i].type === 'answer') {
+                        answerIdx = i;
+                        break;
+                      }
+                    }
+
                     if (answerIdx >= 0) {
                       newLogs[answerIdx] = { ...newLogs[answerIdx], text: parsed.data.text };
                     } else {
@@ -517,7 +562,6 @@ export default function DeepWorkUI() {
                 setIsThinking(false);
               }
             } catch (e) { }
-          }
         }
       }
 
@@ -555,7 +599,7 @@ export default function DeepWorkUI() {
           <div className="absolute right-[15%] w-[20vw] h-[20vh] bg-[#a5f3fc] opacity-30 rounded-[100%] blur-[50px] animate-core-blob animation-delay-3000 mix-blend-overlay"></div>
         </div>
         {/* Tactile Grain Overlay */}
-        <div className="absolute inset-0 z-10 mix-blend-overlay pointer-events-none opacity-[0.25]" style={{ background: 'url("data:image/svg+xml,%3Csvg viewBox=%220 0 200 200%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter id=%22noiseFilter%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%220.85%22 numOctaves=%223%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23noiseFilter)%22/%3E%3C/svg%3E")', WebkitMaskImage: 'linear-gradient(to top, black 0%, transparent 100%)', maskImage: 'linear-gradient(to top, black 0%, transparent 100%)' }}></div>
+        <div className="absolute inset-0 z-10 mix-blend-overlay pointer-events-none opacity-[0.15]" style={{ background: 'url("data:image/svg+xml,%3Csvg viewBox=%220 0 200 200%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter id=%22noiseFilter%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%221.85%22 numOctaves=%223%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23noiseFilter)%22/%3E%3C/svg%3E")', WebkitMaskImage: 'linear-gradient(to top, black 0%, transparent 100%)', maskImage: 'linear-gradient(to top, black 0%, transparent 100%)' }}></div>
       </div>
 
       <Sidebar
@@ -581,7 +625,7 @@ export default function DeepWorkUI() {
         />
 
         {/* Absolute Header (Draggable Region for Electron) */}
-        <div className="absolute top-0 left-0 right-0 h-14 flex items-center justify-between pl-4 pr-[140px] z-20 pointer-events-none [-webkit-app-region:drag]">
+        <div className="absolute top-0 left-0 right-0 h-14 flex items-center justify-between pl-4 pr-[140px] z-50 pointer-events-none [-webkit-app-region:drag]">
           <div className="flex items-center gap-2 pointer-events-auto [-webkit-app-region:no-drag] h-full pt-3">
             {!sidebarOpen && (
               <div className="flex items-center gap-1 mr-2 mt-0">
@@ -599,14 +643,15 @@ export default function DeepWorkUI() {
             )}
             {(() => {
               const activeChat = activeChatId ? chats.find(c => c.id === activeChatId) : null;
-              if (activeChat && activeChat.title) {
-                return (
+              const titleText = activeChat ? activeChat.title : "New Chat";
+              
+              return (
                   <div className="relative [-webkit-app-region:no-drag]">
                     <div
                       onClick={() => setHeaderMenuOpen(!headerMenuOpen)}
-                      className={`flex items-center gap-2 text-[14px] text-[#A3A19E] font-medium cursor-pointer hover:bg-white/5 px-2 py-1 rounded-md transition-colors border border-transparent hover:border-white/5 backdrop-blur-sm ${ headerMenuOpen ? 'bg-white/5 text-[#E8E6E3]' : '' }`}
+                      className={`flex items-center gap-2 text-[14px] font-medium cursor-pointer px-3 py-1.5 rounded-lg transition-all duration-300 border backdrop-blur-md ${ headerMenuOpen ? 'bg-white/[0.12] border-white/[0.15] text-white shadow-sm scale-[0.98]' : 'bg-white/[0.05] border-white/[0.08] text-[#E8E6E3] hover:bg-white/[0.08] hover:border-white/[0.12] active:scale-[0.98] shadow-sm' }`}
                     >
-                      <span className="truncate max-w-[400px]">{activeChat.title}</span>
+                      <span className="truncate max-w-[400px]">{titleText}</span>
                       <ChevronDown className={`w-4 h-4 text-[#555350] shrink-0 transition-transform duration-200 ${ headerMenuOpen ? 'rotate-180' : '' }`} />
                     </div>
                     <AnimatePresence>
@@ -683,8 +728,6 @@ export default function DeepWorkUI() {
                     </AnimatePresence>
                   </div>
                 );
-              }
-              return null;
             })()}
           </div>
         </div>
@@ -715,13 +758,17 @@ export default function DeepWorkUI() {
           audioVolume={audioVolume}
           cancelVoice={cancelVoice}
           acceptVoice={acceptVoice}
+          agentMode={agentMode}
+          onModeChange={setAgentMode}
+          pinnedItems={pinnedItems}
+          setPinnedItems={setPinnedItems}
         />
 
         {/* Disclaimer Text exactly where user wanted it */}
         {traceLogs.length === 0 && !isThinking && (
           <div className="absolute bottom-6 left-0 right-0 flex flex-col items-center pointer-events-none z-40">
             <div className="text-center text-[12px] text-black/60 font-medium tracking-wide mix-blend-overlay">
-              EterX is an AI agent and can make mistakes; please double-check its work.
+              EterX is an AI Agent and can make Mistakes ; Please Double-Check Its Work.
             </div>
           </div>
         )}

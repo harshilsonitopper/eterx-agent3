@@ -1,134 +1,137 @@
 {
-  "goal": "Create a 3D interactive world map app where hovering over a country displays the country name, the current leader's name, and their image. Additionally, create a comprehensive Excel spreadsheet containing a table of all current world leaders' names and details.",
-  "createdAt": 1775625322325,
+  "goal": "Build an SAT-versus-ACT decision engine for students navigating the current digital SAT and the updated ACT. Use official timing, section structure, adaptive SAT practice behavior, answer-key availability, and score concordance to estimate which test gives a student the better odds of a top-score jump. Then generate a six-week prep plan that reallocates study time after every practice test instead of following a generic schedule. Output it as a website with a parent-friendly PDF study plan.",
+  "createdAt": 1775665848865,
   "complexity": "complex",
-  "estimatedMinutes": 45,
+  "estimatedMinutes": 120,
   "status": "in_progress",
   "steps": [
     {
       "id": "step_1",
       "step": 1,
-      "name": "Research world leaders data",
-      "description": "Use web search to find a reliable, up-to-date list of all current world leaders, their countries, and image URLs.",
+      "name": "Research test specifications",
+      "description": "Use web_search to gather current 2026 digital SAT and updated ACT section timings, scoring scales, and official concordance tables.",
       "tools": [
         "web_search"
       ],
-      "done_when": "A comprehensive dataset of world leaders is retrieved.",
+      "done_when": "Data on SAT/ACT timing, scoring, and concordance is collected.",
       "depends_on": [],
       "priority": "high",
-      "status": "pending",
-      "completedAt": null
+      "status": "done",
+      "completedAt": 1775665912749
     },
     {
       "id": "step_2",
       "step": 2,
-      "name": "Generate Excel spreadsheet",
-      "description": "Create a professional Excel file at C:\\Users\\AAYUSHI\\Desktop\\World_Leaders.xlsx containing columns: Country, Leader Name, and Image URL.",
+      "name": "Create decision engine logic",
+      "description": "Write a JavaScript file 'decision_engine.js' that takes user input (practice scores, speed, math/verbal preference) and calculates the test with higher potential for a top-score jump based on concordance.",
       "tools": [
-        "docx_generator"
+        "workspace_write_file"
       ],
-      "done_when": "File exists at the specified path with all data populated.",
+      "done_when": "decision_engine.js is created with functional logic.",
       "depends_on": [
-        1
+        "step 1"
       ],
       "priority": "high",
-      "status": "pending",
-      "completedAt": null
+      "status": "done",
+      "completedAt": 1775665974436
     },
     {
       "id": "step_3",
       "step": 3,
-      "name": "Initialize 3D map project structure",
-      "description": "Create a directory C:\\Users\\AAYUSHI\\Desktop\\WorldMapApp and initialize a basic HTML structure using Three.js.",
+      "name": "Create adaptive scheduler logic",
+      "description": "Write 'scheduler.js' that calculates a 6-week study plan, reallocating hours based on weak points identified after each mock test input.",
       "tools": [
-        "system_shell"
+        "workspace_write_file"
       ],
-      "done_when": "Project directory exists with index.html.",
-      "depends_on": [],
+      "done_when": "scheduler.js is created with adaptive reallocation logic.",
+      "depends_on": [
+        "step 1"
+      ],
       "priority": "high",
       "status": "done",
-      "completedAt": 1775625398785
+      "completedAt": 1775665974437
     },
     {
       "id": "step_4",
       "step": 4,
-      "name": "Write index.html",
-      "description": "Write the HTML file with a canvas element for the 3D scene and a UI overlay for the hover tooltip.",
+      "name": "Build website structure",
+      "description": "Write 'index.html' with a clean, parent-friendly UI for inputting scores and displaying the test recommendation.",
       "tools": [
         "workspace_write_file"
       ],
-      "done_when": "index.html is created in the project folder.",
-      "depends_on": [
-        3
-      ],
-      "priority": "high",
+      "done_when": "index.html is created with input forms and output containers.",
+      "depends_on": [],
+      "priority": "medium",
       "status": "done",
-      "completedAt": 1775625381003
+      "completedAt": 1775666008330
     },
     {
       "id": "step_5",
       "step": 5,
-      "name": "Write styles.css",
-      "description": "Write CSS to style the 3D canvas to fill the screen and define the appearance of the country information tooltip.",
+      "name": "Style the website",
+      "description": "Write 'style.css' to ensure a professional, responsive layout for the decision engine and plan viewer.",
       "tools": [
         "workspace_write_file"
       ],
-      "done_when": "styles.css is created in the project folder.",
+      "done_when": "style.css is created and linked to index.html.",
       "depends_on": [
-        4
+        "step 4"
       ],
-      "priority": "medium",
+      "priority": "low",
       "status": "done",
-      "completedAt": 1775625416444
+      "completedAt": 1775666008330
     },
     {
       "id": "step_6",
       "step": 6,
-      "name": "Write main.js",
-      "description": "Write the Three.js logic to load a 3D globe, implement raycasting for hover detection, and update the tooltip with data from the leaders list.",
+      "name": "Integrate frontend logic",
+      "description": "Write 'app.js' to connect the UI inputs to the decision_engine.js and scheduler.js logic.",
       "tools": [
         "workspace_write_file"
       ],
-      "done_when": "main.js is created in the project folder.",
+      "done_when": "app.js is functional and connected to the HTML.",
       "depends_on": [
-        5
+        "step 2",
+        "step 3",
+        "step 4"
       ],
       "priority": "high",
       "status": "done",
-      "completedAt": 1775625443286
+      "completedAt": 1775666054305
     },
     {
       "id": "step_7",
       "step": 7,
-      "name": "Verify code quality",
-      "description": "Run verification on the created files to ensure the Three.js implementation is syntactically correct.",
+      "name": "Generate PDF template",
+      "description": "Use docx_generator to create a professional PDF template for the 6-week study plan that can be populated with the engine's output.",
       "tools": [
-        "workspace_verify_code"
+        "docx_generator"
       ],
-      "done_when": "Code passes verification checks.",
+      "done_when": "study_plan_template.docx is generated.",
       "depends_on": [
-        6
+        "step 3"
       ],
       "priority": "medium",
-      "status": "pending",
-      "completedAt": null
+      "status": "done",
+      "completedAt": 1775666078982
     },
     {
       "id": "step_8",
       "step": 8,
-      "name": "Notify user",
-      "description": "Send a desktop notification confirming the 3D map app and Excel file are ready on the desktop.",
+      "name": "Verify code",
+      "description": "Run workspace_verify_code on all created JS files to ensure no syntax errors.",
       "tools": [
-        "desktop_notification"
+        "workspace_verify_code"
       ],
-      "done_when": "Notification sent.",
+      "done_when": "All files pass verification.",
       "depends_on": [
-        2,
-        7
+        "step 2",
+        "step 3",
+        "step 6"
       ],
-      "priority": "low",
-      "status": "done",
-      "completedAt": 1775625561715
+      "priority": "high",
+      "status": "pending",
+      "completedAt": null
     }
   ]
 }

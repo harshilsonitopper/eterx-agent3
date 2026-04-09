@@ -128,11 +128,21 @@ export class AgentOrchestrator {
     projectId: string, 
     userRequest: string,
     history: any[] = [],
-    onTrace?: (trace: any) => void
+    onTrace?: (trace: any) => void,
+    mode: 'think' | 'fast' = 'think',
+    pinnedContext: any = null,
+    mediaFiles: any[] = [],
+    imageBackupParts: any[] = []
   ): Promise<AgentResponse> {
     
+    // Inject pinned context into standard prompt if it exists
+    let effectiveRequest = userRequest;
+    if (pinnedContext && pinnedContext.paths) {
+      effectiveRequest = `[CRITICAL PINNED CONTEXT]\nI have explicitly pinned the following paths. You MUST restrict your operations only to these targets: ${JSON.stringify(pinnedContext.paths)}\n\nMy Request:\n${userRequest}`;
+    }
+
     console.log(`[Orchestrator] ========================================`);
-    console.log(`[Orchestrator] Intake & Planning for: "${userRequest}"`);
+    console.log(`[Orchestrator] Intake & Planning for: "${effectiveRequest}"`);
     console.log(`[Orchestrator] User: ${userId} | Project: ${projectId}`);
     console.log(`[Orchestrator] ========================================`);
     
@@ -144,7 +154,10 @@ export class AgentOrchestrator {
     
     // Initialize session continuity — scoped per conversation to prevent stale state bleed
     await globalSessionManager.loadForProject(projectId);
-    globalSessionManager.setLastUserMessage(userRequest);
+    globalSessionManager.setLastUserMessage(effectiveRequest);
+
+    // Set agent mode (Think = gemma-4-31b-it, Fast = gemma-4-26b-it)
+    globalGeminiClient.setMode(mode);
 
     // Setup workspace context
     const workspace = new WorkspaceManager(userId, projectId);
@@ -177,20 +190,22 @@ export class AgentOrchestrator {
       // scaled to task complexity. Session state persists across messages.
       finalAnswer = (await globalGeminiClient.executeMessageLoop(
         context,
-        userRequest,
+        effectiveRequest,
         history,
-        onTrace
+        onTrace,
+        mediaFiles,
+        imageBackupParts
       )).text;
       
       // === CRITIC WITH FEEDBACK RETRY ===
       emitProgress('Validating output', 85);
       const critic = new Critic();
-      const evaluation = await critic.evaluateOutput(userRequest, finalAnswer, context);
+      const evaluation = await critic.evaluateOutput(effectiveRequest, finalAnswer, context);
       isValid = evaluation.passed;
       
       if (!isValid) {
         console.log(`[Orchestrator] ⚠️ Critic rejected: ${evaluation.feedback}`);
-        globalMemoryManager.logError('critic', evaluation.feedback, `Task: ${userRequest}`);
+        globalMemoryManager.logError('critic', evaluation.feedback, `Task: ${effectiveRequest}`);
 
         // === FEEDBACK RETRY: Give the agent ONE chance to self-correct ===
         console.log(`[Orchestrator] 🔄 Attempting critic feedback retry...`);
@@ -224,7 +239,7 @@ export class AgentOrchestrator {
 Your previous output was reviewed and REJECTED for this reason:
 "${evaluation.feedback}"
 
-Original user request: "${userRequest.substring(0, 300)}"
+Original user request: "${effectiveRequest.substring(0, 300)}"
 
 Fix the issue identified by the critic. Be concise — only address the specific feedback above.
 DO NOT redo the entire task from scratch. Just fix the identified problem.`;
@@ -233,7 +248,7 @@ DO NOT redo the entire task from scratch. Just fix the identified problem.`;
             context,
             retryPrompt,
             history,
-            onTrace
+            undefined // Silent retry — don't stream trace events to UI
           );
           
           finalAnswer = retryResult.text;

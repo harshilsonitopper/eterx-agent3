@@ -53,9 +53,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   className="w-full flex items-center justify-between px-3 py-2.5 text-[14px] font-medium text-[#E8E6E3] bg-white/[0.03] border border-white/5 rounded-lg transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] hover:bg-white/[0.08] hover:border-white/20 active:scale-95 shadow-[0_4px_20px_rgba(0,0,0,0.3)] group"
                 >
                   <div className="flex items-center gap-3">
-                    <Plus className="w-[18px] h-[18px] text-[#E8E6E3] group-hover:rotate-90 transition-transform duration-500" /> New chat
+                    <div className="w-[28px] h-[28px] flex items-center justify-center bg-white/[0.04] border border-white/[0.08] rounded-full group-hover:bg-white/[0.1] group-hover:border-white/[0.15] transition-all duration-500 shadow-sm">
+                      <Plus className="w-[16px] h-[16px] text-[#E8E6E3] group-hover:rotate-90 transition-transform duration-500" strokeWidth={2.5} />
+                    </div>
+                    New chat
                   </div>
-                  <span className="text-[10px] text-white/20 tracking-widest font-mono group-hover:text-white/40 transition-colors">Ctrl+⇧+O</span>
+                  <span className="text-[10px] text-white/20 tracking-widest font-mono group-hover:text-white/40 transition-colors"></span>
                 </button>
               </Tooltip>
 

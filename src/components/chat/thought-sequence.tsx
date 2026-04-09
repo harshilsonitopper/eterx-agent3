@@ -121,17 +121,22 @@ const getLogStyle = (text: string, type: string, iconName?: string) => {
  */
 const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'medium' | 'slow' = 'fast') => {
   // Use refs to avoid stale closures in setInterval
-  const revealedCountRef = useRef(0);
+  // Initialize at full length if not active, so re-mounts never "replay"
+  const revealedCountRef = useRef(isActive ? 0 : targetText.length);
   const targetTextRef = useRef(targetText);
   const [, forceRender] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevLengthRef = useRef(0);
+  const prevLengthRef = useRef(isActive ? 0 : targetText.length);
 
   // Sync the latest text so the running interval always sees the dynamic length
   targetTextRef.current = targetText;
 
-  // Characters to reveal per tick (batch for speed)
-  const charsPerTick = speed === 'fast' ? 4 : speed === 'medium' ? 2 : 1;
+  // Fluctuating characters per tick for natural feel (avg ~4)
+  const getCharsPerTick = () => {
+    const base = speed === 'fast' ? 4 : speed === 'medium' ? 2 : 1;
+    const variance = Math.max(1, Math.floor(base * 0.6));
+    return base + Math.floor(Math.random() * (variance * 2 + 1)) - variance; // e.g. fast: 2-6
+  };
   const tickMs = speed === 'fast' ? 12 : speed === 'medium' ? 20 : 35;
 
   useEffect(() => {
@@ -171,7 +176,7 @@ const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'm
 
     timerRef.current = setInterval(() => {
       revealedCountRef.current = Math.min(
-        revealedCountRef.current + charsPerTick,
+        revealedCountRef.current + getCharsPerTick(),
         targetTextRef.current.length // Real-time updated sync from the ref!
       );
       forceRender(n => n + 1);
@@ -197,7 +202,7 @@ const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'm
       // New text arrived after timer randomly finished — restart unified animation sync
       timerRef.current = setInterval(() => {
         revealedCountRef.current = Math.min(
-          revealedCountRef.current + charsPerTick,
+          revealedCountRef.current + getCharsPerTick(),
           targetTextRef.current.length
         );
         forceRender(n => n + 1);
@@ -233,7 +238,7 @@ const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'm
 export const ProfessionalThought = ({ text, isLatest, isThinking, variant = 'thought' }: { text: string, isLatest: boolean, isThinking: boolean, variant?: 'thought' | 'answer' }) => {
   // Use typewriter for thinking thoughts (not answers — answers use their own streaming)
   const shouldTypewrite = variant === 'thought' && isLatest && isThinking;
-  const { displayedText } = useTypewriter(text, shouldTypewrite, 'medium');
+  const { displayedText } = useTypewriter(text, shouldTypewrite, 'fast');
 
   const rawText = shouldTypewrite ? displayedText : text;
 
@@ -279,7 +284,7 @@ export const ProfessionalThought = ({ text, isLatest, isThinking, variant = 'tho
         ...markdownComponents,
         p: ({ node, ...props }: any) => variant === 'answer'
           ? <p className="mb-4 last:mb-0 font-normal text-[15.5px]" {...props} />
-          : <p className="text-[#A3A19E] mb-2 font-serif leading-relaxed break-words" {...props} />,
+          : <p className="text-[#A3A19E] mb-2 font-sans font-medium leading-relaxed break-words tracking-wide" {...props} />,
         strong: ({ node, ...props }: any) => variant === 'answer'
           ? <strong className="font-semibold text-[#E8E6E3]" {...props} />
           : <strong className="font-semibold text-[#c4c2c0]" {...props} />,
@@ -350,14 +355,14 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
       const mainLogs = flowLogs.filter(l => !l.subAgent);
       if (mainLogs.length === 0) return 'Orchestrating...';
       const last = mainLogs[mainLogs.length - 1];
-      if (last.type === 'thought_stream') return 'Deep reasoning...';
+      if (last.type === 'thought_stream') return 'Thinking';
       return last.text || 'Working...';
     }
     const agentLogs = flowLogs.filter(l => l.subAgent === agentName);
     const lastLog = agentLogs[agentLogs.length - 1];
     if (!lastLog) return 'Initializing...';
     if (lastLog.type === 'sub_agent_answer') return 'Completed task.';
-    if (lastLog.type === 'thought_stream') return 'Deep reasoning...';
+    if (lastLog.type === 'thought_stream') return 'Thinking';
     return lastLog.text || 'Working...';
   };
 
@@ -408,26 +413,27 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
     const mainLogs = flowLogs.filter(l => !l.subAgent);
     const duration = getDurationString();
     const timeStr = duration && !isThinking ? ` for ${duration}` : '';
+    const hasToolUse = mainLogs.some(l => l.type !== 'thought_stream');
 
     // If the latest log is a tool execution from the MAIN agent, vividly display it
     const lastLog = mainLogs[mainLogs.length - 1];
     if (lastLog && lastLog.type !== 'thought_stream') {
       if (lastLog.text?.includes('Spawning')) return 'Orchestrating agents...';
-      if (!isThinking) return `Agent task completed${timeStr}`;
+      if (!isThinking) return `Worked${timeStr}`;
       return lastLog.text + '...';
     }
 
-    if (isThinking) return 'Deep reasoning...';
+    if (isThinking) return 'Thinking';
     
-    return mainLogs.length > 1 ? `Agent task completed${timeStr}` : `Knowledge analysis finalized${timeStr}`;
+    return hasToolUse ? `Worked${timeStr}` : `Thought${timeStr}`;
   };
 
   const activitySummary = getDynamicThoughtHeading();
 
   return (
-    <div className="w-full flex items-start gap-4 mt-8 mb-6 group/process max-w-full">
+    <div className="w-full flex items-start gap-5 mt-8 mb-6 group/process max-w-full">
       {/* Dynamic left side icon with Gyroscopic Deep-Work Animation */}
-      <div className="mt-[2px] w-6 h-6 flex items-center justify-center shrink-0 relative">
+      <div className="mt-1.5 w-6 h-6 flex items-center justify-center shrink-0 relative">
         <div className="relative w-8 h-8 flex items-center justify-center shrink-0">
           {/* Loading arc indicator - logo colors, partial ring */}
           <motion.div
@@ -455,8 +461,8 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
             className="object-contain z-10"
             initial={false}
             animate={isThinking ? {
-              rotate: [0, 360, 720, 1080],
-              scale: [1, 1, 1, 1.4, 1],
+              rotate: [0, 360],
+              scale: [1, 1.08, 1],
               width: "18px",
               height: "18px",
               opacity: 1
@@ -466,11 +472,11 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
               width: "22px",
               height: "22px",
               opacity: 1,
-              filter: "drop-shadow(0 0 12px rgba(255, 255, 255, 0.15))" // Subtle clean white focus glow
+              filter: "drop-shadow(0 0 12px rgba(255, 255, 255, 0.15))"
             }}
             transition={isThinking ? {
-              rotate: { duration: 1.5, repeat: Infinity, ease: "easeInOut", times: [0, 0.4, 0.8, 1] },
-              scale: { duration: 1.5, repeat: Infinity, ease: "easeInOut", times: [0, 0.4, 0.8, 0.9, 1] }
+              rotate: { duration: 2.5, repeat: Infinity, ease: "linear" },
+              scale: { duration: 2, repeat: Infinity, ease: "easeInOut" }
             } : {
               type: "spring",
               damping: 20,
@@ -485,9 +491,9 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
         {/* Animated Live Header */}
         <div
           onClick={() => setIsOpen(!isOpen)}
-          className={`flex items-center gap-2 cursor-pointer transition-all duration-300 self-start max-w-full group ${ isOpen ? 'opacity-100 translate-x-1' : 'opacity-70 hover:opacity-100' }`}
+          className={`flex items-center gap-2 cursor-pointer transition-all duration-300 self-start max-w-full group px-3 py-1.5 -ml-3 rounded-2xl border ${ isOpen ? 'opacity-100 bg-[#1A1A1A]/80 backdrop-blur-xl border-white/[0.06] shadow-sm' : 'opacity-90 bg-[#111111]/60 backdrop-blur-md border-white/[0.03] hover:opacity-100 hover:bg-[#1A1A1A]/80 hover:border-white/[0.06] hover:shadow-sm' }`}
         >
-          <div className="flex-1 overflow-hidden h-[24px] flex items-center">
+          <div className="flex-1 min-h-[24px] flex items-center">
             <AnimatePresence mode="wait">
               <motion.span
                 key={activitySummary}
@@ -504,9 +510,9 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
                   backgroundPosition: { duration: 3, repeat: Infinity, ease: "linear" }
                 }}
                 style={isThinking ? { backgroundSize: '300% auto' } : {}}
-                className={`text-[14px] truncate inline-block tracking-tight ${ isThinking
-                  ? 'bg-gradient-to-r from-[#8C8A88] via-[#E8E6E3] to-[#8C8A88] bg-clip-text text-transparent font-serif italic font-medium pb-[1px] pr-2'
-                  : 'text-[#8C8A88] group-hover:text-[#E8E6E3] font-sans pr-2'
+                className={`text-[15px] inline-block tracking-tight font-sans pr-2 ${ isThinking
+                  ? 'bg-gradient-to-r from-[#8C8A88] via-[#E8E6E3] to-[#8C8A88] bg-clip-text text-transparent font-medium'
+                  : 'text-[#8C8A88] group-hover:text-[#E8E6E3]'
                   }`}
               >
                 {activitySummary}
@@ -524,7 +530,7 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
               animate={{ height: 'auto', opacity: 1, y: 0 }}
               exit={{ height: 0, opacity: 0, y: -10 }}
               transition={{ type: "spring", damping: 20, stiffness: 120 }}
-              className="mt-4 overflow-visible mb-2 min-w-0 rounded-t-[32px] rounded-b-xl bg-[#080808]/80 border border-white/[0.03] backdrop-blur-2xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.8)] relative"
+              className="mt-1 overflow-visible mb-2 min-w-0 -ml-3 rounded-t-[32px] rounded-b-xl bg-[#080808]/80 border border-white/[0.03] backdrop-blur-2xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.8)] relative"
             >
               <div className="flex flex-col relative w-full h-full">
                 {agents.length > 0 && (
