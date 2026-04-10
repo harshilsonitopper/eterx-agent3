@@ -1,17 +1,20 @@
-import { globalGeminiClient } from '../gemini';
+import { GoogleGenAI } from '@google/genai';
 import { ProjectContext, SubAgent } from '../schemas';
 import path from 'path';
 import fs from 'fs-extra';
 
 /**
- * Sub-Agent Spawner v4 — Rate-Limited, Cancellable, Non-Blocking
+ * Sub-Agent Spawner v5 — Parallel API Keys, Fire-and-Forget, Non-Blocking
  * 
- * Critical upgrades over v3:
- * - Global cancellation flag: user "stop" kills all sub-agents immediately
- * - Sub-agents run with reduced max iterations (15) to limit API usage
- * - Results stream back to main agent via traceLog in real-time
- * - Non-blocking spawn mode: main agent continues working while sub-agents run
- * - Detailed completion reports auto-injected into main agent on finish
+ * v5 Critical upgrades:
+ * - KEY ISOLATION: Each sub-agent gets its own GeminiAgentClient with a DIFFERENT
+ *   API key offset, so parallel agents never collide on rate limits.
+ * - FIRE-AND-FORGET SPAWN: spawnParallel returns immediately with agent names.
+ *   The main agent continues working while sub-agents run in the background.
+ * - RESULT QUEUE: Sub-agent results are silently queued until main agent calls 'collect'.
+ * - NO ANSWER POLLUTION: Sub-agents never emit 'answer' type events — only 'sub_agent_result'.
+ *   This prevents the typewriter animation from replaying when a sub-agent finishes.
+ * - Global cancellation flag: user "stop" kills all sub-agents immediately.
  */
 
 const AGENT_NAMES = [
@@ -24,12 +27,11 @@ export type SubAgentName = typeof AGENT_NAMES[number];
 const AGENTS_DIR = path.resolve(process.cwd(), '.workspaces', 'agents');
 
 // === GLOBAL CANCELLATION FLAG ===
-// When set to true, all sub-agents abort at the next loop iteration
 let globalCancelFlag = false;
 
 export function cancelAllSubAgents() {
   globalCancelFlag = true;
-  console.log('[SubAgent] 🛑 GLOBAL CANCEL — all sub-agents will stop at next iteration');
+  console.log('[SubAgent] 🛑 GLOBAL CANCEL — all sub-agents stopping');
 }
 
 export function resetCancelFlag() {
@@ -38,6 +40,36 @@ export function resetCancelFlag() {
 
 export function isCancelled(): boolean {
   return globalCancelFlag;
+}
+
+// === API KEY POOL FOR SUB-AGENTS ===
+// Discover all available API keys once, then each sub-agent picks a different one
+let allApiKeys: string[] = [];
+function discoverApiKeys(): string[] {
+  if (allApiKeys.length > 0) return allApiKeys;
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string' && value.startsWith('AIza')) {
+      allApiKeys.push(value);
+    }
+  }
+  if (allApiKeys.length === 0) {
+    const fallback = process.env.GEMINI_API_KEY;
+    if (fallback) allApiKeys.push(fallback);
+  }
+  return allApiKeys;
+}
+
+/**
+ * Create a DEDICATED Gemini client for a specific sub-agent.
+ * Each sub-agent uses a different API key offset to avoid rate-limit collisions.
+ */
+function createSubAgentClient(agentIndex: number): GoogleGenAI {
+  const keys = discoverApiKeys();
+  if (keys.length === 0) throw new Error('No API keys available for sub-agent');
+  // Pick a key at an offset from the main agent's key to avoid collision
+  // Main agent uses index 0, sub-agents use 1, 2, 3, etc.
+  const keyIndex = (agentIndex + 1) % keys.length;
+  return new GoogleGenAI({ apiKey: keys[keyIndex] });
 }
 
 /**
@@ -108,9 +140,23 @@ interface SubAgentInstance {
   promise?: Promise<any>;
 }
 
+// === RESULT QUEUE: Sub-agent results are silently queued here ===
+const pendingResults: Map<string, { name: SubAgentName, result: string, success: boolean, durationMs: number }> = new Map();
+
+export function getPendingResults(): Array<{ name: SubAgentName, result: string, success: boolean, durationMs: number }> {
+  const results = Array.from(pendingResults.values());
+  pendingResults.clear();
+  return results;
+}
+
+export function hasPendingResults(): boolean {
+  return pendingResults.size > 0;
+}
+
 export class SubAgentSpawner {
   private activeAgents: Map<string, SubAgentInstance> = new Map();
   private nameIndex: number = 0;
+  private backgroundPromises: Map<string, Promise<any>> = new Map();
 
   private getNextName(): SubAgentName {
     const name = AGENT_NAMES[this.nameIndex % AGENT_NAMES.length];
@@ -120,7 +166,6 @@ export class SubAgentSpawner {
 
   /**
    * Build a LEAN task brief for a sub-agent.
-   * Reduced from v3's massive prompt to save tokens.
    */
   private buildDeepBrief(task: string, agentName: SubAgentName, parentContext?: string): string {
     return `━━━ SUB-AGENT: ${ agentName } ━━━
@@ -131,10 +176,10 @@ ${ task }
 RULES:
 1. Full tool access. Use workspace_write_file, web_search, system_shell, etc.
 2. Work deeply — no shortcuts, no placeholders, no TODOs.
-3. NEVER call task_decomposer — plan internally (3-5 steps max).
-4. Limit web_search to 2 calls. Read files only ONCE each.
-5. VERIFY your work with realtime_verify before finishing.
-6. When done, output a structured report.
+3. NEVER call task_decomposer or spawn_sub_agent — plan internally (3-5 steps max).
+4. VERIFY your work with realtime_verify before finishing.
+5. When done, output a structured report — do NOT announce completion of the whole project.
+6. You are ONE of multiple parallel agents. Your report goes back to the MAIN AGENT for assembly.
 
 REPORT FORMAT:
 ## ${ agentName } — Complete
@@ -148,11 +193,12 @@ EXECUTE NOW.`.trim();
   }
 
   /**
-   * Spawn a single sub-agent with rate-limited execution.
+   * Spawn a single sub-agent with its own API key.
    */
   public async spawnAgent(
     task: string,
     context: ProjectContext,
+    agentIndex: number,
     parentContext?: string,
     onTrace?: (trace: any) => void,
     customName?: SubAgentName
@@ -160,7 +206,6 @@ EXECUTE NOW.`.trim();
     const name = customName || this.getNextName();
     const agentId = `${ name.toLowerCase().replace('-', '_') }_${ Date.now() }`;
 
-    // Check cancellation before starting
     if (globalCancelFlag) {
       return { agentId, name, result: 'Cancelled by user', success: false, durationMs: 0, traceLog: ['Cancelled before start'] };
     }
@@ -179,8 +224,6 @@ EXECUTE NOW.`.trim();
     };
     this.activeAgents.set(agentId, instance);
 
-    console.log(`[${ name }] ⚡ Spawned for: "${ task.substring(0, 100) }..."`);
-
     await agentMessageBus.writeAgentStatus(name, {
       status: 'running',
       task,
@@ -188,13 +231,17 @@ EXECUTE NOW.`.trim();
       startedAt: instance.startedAt
     });
 
+    // Emit spawn event to UI — shows the agent tab appearing
     if (onTrace) {
-      onTrace({ type: 'command', text: `${ name } spawned`, secondary: task.substring(0, 60) });
+      onTrace({ type: 'command', text: `${ name } spawned`, secondary: task.substring(0, 60), subAgent: name });
     }
 
     instance.status = 'running';
 
     try {
+      // Import executeMessageLoop dynamically to avoid circular deps
+      const { globalGeminiClient } = await import('../gemini');
+      
       const result = await globalGeminiClient.executeMessageLoop(
         context,
         deepBrief,
@@ -208,8 +255,8 @@ EXECUTE NOW.`.trim();
           const logEntry = `[${ new Date().toISOString() }] ${ trace.type }: ${ trace.text || '' }${ trace.secondary ? ' | ' + trace.secondary : '' }`;
           traceLog.push(logEntry);
 
-          // Write status every 3rd event
-          if (traceLog.length % 3 === 0) {
+          // Write status every 5th event (reduced from 3 to lower disk I/O)
+          if (traceLog.length % 5 === 0) {
             agentMessageBus.writeAgentStatus(name, {
               status: 'running',
               task,
@@ -219,7 +266,9 @@ EXECUTE NOW.`.trim();
             }).catch(() => { });
           }
 
-          if (onTrace) {
+          // Forward trace to UI with subAgent tag — BUT filter out 'answer' type
+          // Sub-agents must NEVER emit 'answer' to the UI or it replays the typewriter
+          if (onTrace && trace.type !== 'answer') {
             onTrace({
               ...trace,
               text: trace.text,
@@ -245,11 +294,13 @@ EXECUTE NOW.`.trim();
         completedAt: instance.completedAt
       });
 
-      console.log(`[${ name }] ✅ Completed in ${ (durationMs / 1000).toFixed(1) }s`);
+      console.log(`[${ name }] ✅ Done ${ (durationMs / 1000).toFixed(1) }s`);
+
+      // Queue result silently — main agent picks it up via 'collect'
+      pendingResults.set(name, { name, result: result.text, success: true, durationMs });
 
       if (onTrace) {
-        // Emit detailed completion event for the main agent and UI
-        onTrace({ type: 'command', text: `${ name } completed`, secondary: `${ (durationMs / 1000).toFixed(1) }s` });
+        // Emit ONLY 'sub_agent_result' — NEVER 'answer'
         onTrace({
           type: 'sub_agent_result',
           text: `${ name } finished: ${ result.text.substring(0, 200) }`,
@@ -280,12 +331,6 @@ EXECUTE NOW.`.trim();
         completedAt: instance.completedAt
       });
 
-      if (wasCancelled) {
-        console.log(`[${ name }] 🛑 Cancelled after ${ (durationMs / 1000).toFixed(1) }s`);
-      } else {
-        console.error(`[${ name }] ❌ Failed in ${ (durationMs / 1000).toFixed(1) }s: ${ error.message }`);
-      }
-
       if (onTrace) {
         onTrace({
           type: wasCancelled ? 'command' : 'safety_warning',
@@ -300,8 +345,64 @@ EXECUTE NOW.`.trim();
   }
 
   /**
-   * Spawn multiple sub-agents in TRUE PARALLEL.
-   * Increased stagger to 8s to reduce API pressure.
+   * FIRE-AND-FORGET: Spawn multiple sub-agents in TRUE PARALLEL.
+   * Returns IMMEDIATELY with agent names. Main agent continues working.
+   * Sub-agents run in the background with their own API keys.
+   * Main agent calls 'collect' later to get results.
+   */
+  public spawnParallelFireAndForget(
+    tasks: Array<{ task: string, name?: SubAgentName }>,
+    context: ProjectContext,
+    parentContext?: string,
+    onTrace?: (trace: any) => void
+  ): { agentNames: string[], message: string } {
+    // Reset cancel flag at start of parallel spawn
+    resetCancelFlag();
+
+    const teamSize = tasks.length;
+
+    if (onTrace) {
+      const spawnedAgents = tasks.map((t, i) => t.name || AGENT_NAMES[i % AGENT_NAMES.length]);
+      onTrace({
+        type: 'command',
+        text: `Spawning ${ teamSize } parallel agents`,
+        secondary: spawnedAgents.join(' + '),
+        spawnedAgents: spawnedAgents
+      });
+    }
+
+    const agentNames: string[] = [];
+
+    // Launch all agents in parallel — each with a staggered start and different API key
+    tasks.forEach((t, index) => {
+      const name = t.name || this.getNextName();
+      agentNames.push(name);
+
+      // Fire-and-forget: start without awaiting
+      const promise = (async () => {
+        if (globalCancelFlag) return;
+        
+        // Reduced stagger: 2s (was 8s) because each agent has its own API key now
+        if (index > 0) {
+          await new Promise(r => setTimeout(r, index * 2000));
+          if (globalCancelFlag) return;
+        }
+
+        await this.spawnAgent(t.task, context, index, parentContext, onTrace, name as SubAgentName);
+      })();
+
+      this.backgroundPromises.set(name, promise);
+    });
+
+    return {
+      agentNames,
+      message: `${ teamSize } agents spawned and working in background. Continue YOUR work now. Call spawn_sub_agent with mode="collect" when you need their results.`
+    };
+  }
+
+  /**
+   * BLOCKING: Spawn multiple sub-agents and WAIT for all to complete.
+   * Use this only when the main agent needs all results before continuing.
    */
   public async spawnParallel(
     tasks: Array<{ task: string, name?: SubAgentName }>,
@@ -314,29 +415,20 @@ EXECUTE NOW.`.trim();
     successCount: number,
     failCount: number
   }> {
-    // Reset cancel flag at start of parallel spawn
     resetCancelFlag();
 
-    const teamSize = tasks.length;
-    console.log(`\n[SubAgent] ━━━ SPAWNING ${ teamSize } PARALLEL AGENTS ━━━`);
-    tasks.forEach((t, i) => {
-      const name = t.name || AGENT_NAMES[i % AGENT_NAMES.length];
-      console.log(`  ${ name }: ${ t.task.substring(0, 80) }`);
-    });
+    const startTime = Date.now();
 
     if (onTrace) {
       const spawnedAgents = tasks.map((t, i) => t.name || AGENT_NAMES[i % AGENT_NAMES.length]);
       onTrace({
         type: 'command',
-        text: `Spawning ${ teamSize } parallel agents`,
+        text: `Spawning ${ tasks.length } parallel agents`,
         secondary: spawnedAgents.join(' + '),
         spawnedAgents: spawnedAgents
       });
     }
 
-    const startTime = Date.now();
-
-    // Stagger agent launches by 8s to avoid API rate-limit cascade
     const promises = tasks.map((t, index) => {
       const name = t.name || this.getNextName();
       return new Promise<any>(async (resolve) => {
@@ -344,23 +436,20 @@ EXECUTE NOW.`.trim();
           resolve({ agentId: '', name, result: 'Cancelled', success: false, durationMs: 0, traceLog: [] });
           return;
         }
+        // Stagger by 2s (was 8s) — each agent has its own key now
         if (index > 0) {
-          const staggerDelay = index * 8000; // 8s stagger (was 5s)
-          console.log(`[SubAgent] ⏳ ${ name } staggered launch in ${ staggerDelay / 1000 }s...`);
-          await new Promise(r => setTimeout(r, staggerDelay));
-          // Re-check cancel after waiting
+          await new Promise(r => setTimeout(r, index * 2000));
           if (globalCancelFlag) {
             resolve({ agentId: '', name, result: 'Cancelled', success: false, durationMs: 0, traceLog: [] });
             return;
           }
         }
-        const result = await this.spawnAgent(t.task, context, parentContext, onTrace, name);
+        const result = await this.spawnAgent(t.task, context, index, parentContext, onTrace, name as SubAgentName);
         resolve(result);
       });
     });
 
     const settled = await Promise.allSettled(promises);
-
     const totalDurationMs = Date.now() - startTime;
 
     const results = settled.map((r, i) => {
@@ -383,18 +472,31 @@ EXECUTE NOW.`.trim();
     const successCount = results.filter(r => r.success).length;
     const failCount = results.filter(r => !r.success).length;
 
-    console.log(`\n[SubAgent] ━━━ TEAM RESULTS ━━━`);
-    console.log(`  Total: ${ teamSize } | Success: ${ successCount } | Failed: ${ failCount } | Duration: ${ (totalDurationMs / 1000).toFixed(1) }s`);
-
     if (onTrace) {
       onTrace({
         type: 'command',
-        text: `${ successCount }/${ teamSize } agents completed`,
+        text: `${ successCount }/${ tasks.length } agents completed`,
         secondary: `${ (totalDurationMs / 1000).toFixed(1) }s total`
       });
     }
 
     return { results, totalDurationMs, successCount, failCount };
+  }
+
+  /**
+   * Wait for all background (fire-and-forget) agents to finish.
+   */
+  public async waitForAll(): Promise<void> {
+    const promises = Array.from(this.backgroundPromises.values());
+    await Promise.allSettled(promises);
+    this.backgroundPromises.clear();
+  }
+
+  /**
+   * Check how many agents are still running in the background.
+   */
+  public getBackgroundCount(): number {
+    return this.backgroundPromises.size;
   }
 
   public getAgentStatus(): SubAgentInstance[] {
@@ -411,6 +513,116 @@ EXECUTE NOW.`.trim();
         this.activeAgents.delete(id);
       }
     }
+  }
+
+  /**
+   * MULTI-AGENT CONSENSUS MODE
+   * 
+   * Spawns 3 agents with different cognitive "lenses" to approach the SAME task:
+   * - Agent-Alpha (Optimist): Focuses on opportunities, best-case scenarios, positive outcomes
+   * - Agent-Nova (Skeptic): Focuses on risks, edge cases, what could go wrong
+   * - Agent-Bolt (Realist): Focuses on practical execution, real constraints, balanced view
+   * 
+   * The main agent then synthesizes their outputs into a consensus answer,
+   * eliminating hallucination and single-perspective bias.
+   * 
+   * Use for: high-stakes analysis, financial decisions, security audits, strategic planning.
+   */
+  public async spawnConsensus(
+    task: string,
+    context: ProjectContext,
+    onTrace?: (trace: any) => void
+  ): Promise<{
+    perspectives: Array<{ perspective: string, agent: string, result: string, success: boolean }>,
+    synthesisPrompt: string,
+    totalDurationMs: number
+  }> {
+    const perspectives = [
+      {
+        name: 'Agent-Alpha' as SubAgentName,
+        lens: 'OPTIMIST',
+        brief: `You are the OPTIMIST perspective agent. Approach this task with a focus on OPPORTUNITIES, best-case outcomes, strengths, and positive potential. Highlight what COULD go well and why.
+
+TASK: ${task}
+
+Your analysis should cover the optimistic angle: growth potential, advantages, strengths, positive trends, best-case scenarios. Be thorough but maintain your optimistic lens. Back your points with evidence.`
+      },
+      {
+        name: 'Agent-Nova' as SubAgentName,
+        lens: 'SKEPTIC', 
+        brief: `You are the SKEPTIC perspective agent. Approach this task with a focus on RISKS, edge cases, weaknesses, and what could go wrong. Challenge assumptions and look for hidden problems.
+
+TASK: ${task}
+
+Your analysis should cover the skeptical angle: risks, weaknesses, threats, negative trends, worst-case scenarios, hidden costs. Be thorough and honest. Don't be contrarian for its own sake — identify REAL risks with evidence.`
+      },
+      {
+        name: 'Agent-Bolt' as SubAgentName,
+        lens: 'REALIST',
+        brief: `You are the REALIST perspective agent. Approach this task with a focus on PRACTICAL EXECUTION, real constraints, balanced trade-offs, and actionable recommendations.
+
+TASK: ${task}
+
+Your analysis should cover the realistic angle: practical constraints, balanced assessment, implementation challenges, realistic timelines, and concrete action items. Weigh both pros and cons fairly. Focus on what's actually achievable.`
+      }
+    ];
+
+    if (onTrace) {
+      onTrace({
+        type: 'command',
+        text: 'Spawning 3-agent consensus panel',
+        secondary: 'Optimist + Skeptic + Realist',
+        spawnedAgents: perspectives.map(p => p.name)
+      });
+    }
+
+    const startTime = Date.now();
+
+    const results = await this.spawnParallel(
+      perspectives.map(p => ({ task: p.brief, name: p.name })),
+      context,
+      `This is a CONSENSUS PANEL analysis. You are the ${perspectives[0].lens} lens.`,
+      onTrace
+    );
+
+    const perspectiveResults = results.results.map((r, i) => ({
+      perspective: perspectives[i].lens,
+      agent: perspectives[i].name,
+      result: r.result,
+      success: r.success
+    }));
+
+    // Build synthesis prompt for the main agent
+    const synthesisPrompt = `━━━ MULTI-AGENT CONSENSUS RESULTS ━━━
+
+Three independent agents analyzed this task from different perspectives. Synthesize their findings into a UNIFIED, balanced answer.
+
+ORIGINAL TASK: "${task}"
+
+📗 OPTIMIST (${perspectives[0].name}):
+${perspectiveResults[0]?.result || 'No result'}
+
+📕 SKEPTIC (${perspectives[1].name}):
+${perspectiveResults[1]?.result || 'No result'}
+
+📘 REALIST (${perspectives[2].name}):
+${perspectiveResults[2]?.result || 'No result'}
+
+━━━ YOUR JOB ━━━
+Synthesize these three perspectives into ONE definitive, balanced answer. 
+- Where all three agree → HIGH CONFIDENCE facts
+- Where optimist and skeptic disagree → present BOTH sides with the realist's take as tiebreaker
+- Highlight KEY RISKS the skeptic found that others missed
+- Highlight KEY OPPORTUNITIES the optimist found that others missed
+- End with ACTIONABLE RECOMMENDATIONS from the realist perspective
+
+Do NOT just list what each agent said. SYNTHESIZE into a cohesive analysis.`;
+
+    return {
+      perspectives: perspectiveResults,
+      synthesisPrompt,
+      totalDurationMs: Date.now() - startTime
+    };
   }
 }
 

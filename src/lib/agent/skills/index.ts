@@ -67,13 +67,4 @@ const mdCount = mdSkills.length;
 const totalCount = Object.keys(SKILL_REGISTRY).length;
 const overrides = Object.keys(STATIC_SKILLS).filter(id => MD_SKILLS[id]);
 
-console.log(`[Skills] ┌─────────────────────────────────────────────┐`);
-console.log(`[Skills] │ Registry: ${totalCount} skills loaded                   │`);
-console.log(`[Skills] │ Static (.ts): ${staticCount} │ Markdown (.md): ${mdCount}             │`);
-if (overrides.length > 0) {
-  console.log(`[Skills] │ Overrides: ${overrides.join(', ')}${' '.repeat(Math.max(0, 20 - overrides.join(', ').length))}│`);
-}
-console.log(`[Skills] └─────────────────────────────────────────────┘`);
-
-// Log all registered skill IDs for debugging
-console.log(`[Skills] IDs: ${Object.keys(SKILL_REGISTRY).sort().join(', ')}`);
+console.log(`[Skills] ✅ ${totalCount} skills (${staticCount} static + ${mdCount} markdown)`);

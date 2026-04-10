@@ -1,6 +1,7 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, LayoutDashboard, Bot, Layers, FolderOpen, Code2, PanelLeft, Download, X } from 'lucide-react';
+import { Plus, Search, LayoutDashboard, Bot, Layers, FolderOpen, Code2, PanelLeft, Download, X, Loader2, MoreHorizontal, Share, Edit2, Star, FolderInput, Trash2, ChevronRight } from 'lucide-react';
 import { Tooltip } from '../ui/tooltip';
 
 interface ChatSession {
@@ -21,12 +22,24 @@ interface SidebarProps {
   onSearchClick: () => void;
   activeView: 'chat' | 'code';
   setActiveView: (view: 'chat' | 'code') => void;
+  isThinking?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
-  isOpen, setIsOpen, createNewChat, chats, activeChatId, loadChat, deleteChat, onSearchClick, activeView, setActiveView
+  isOpen, setIsOpen, createNewChat, chats, activeChatId, loadChat, deleteChat, onSearchClick, activeView, setActiveView, isThinking
 }) => {
+  const [menuState, setMenuState] = React.useState<{ id: string, x: number, y: number, dropUp: boolean } | null>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = () => setMenuState(null);
+    if (menuState) {
+      document.addEventListener('click', handleClickOutside);
+    }
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [menuState]);
+
   return (
+    <>
     <AnimatePresence>
       {isOpen && (
         <motion.div
@@ -117,22 +130,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {chats.length === 0 ? (
                 <div className="px-3 py-2 text-[13px] text-[#555350] italic">No active projects</div>
               ) : (
-                chats.map((chat) => (
-                  <div
-                    key={chat.id}
-                    onClick={() => { loadChat(chat.id); setActiveView('chat'); }}
-                    className={`w-full text-left px-3 transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] flex items-center justify-between group cursor-pointer active:scale-[0.98] ${ activeChatId === chat.id && activeView === 'chat' ? 'bg-[#181818]/80 backdrop-blur-xl border border-white/[0.08] text-[#E8E6E3] font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.5)] rounded-[12px] py-3 text-[13.5px] relative z-10 overflow-hidden' : 'py-2.5 text-[13px] rounded-lg border border-transparent text-[#A3A19E] hover:bg-white/5 active:bg-white/10 hover:text-[#E8E6E3]' }`}
-                  >
-                    <span className="truncate pr-2">{chat.title}</span>
-                    <X
-                      className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-[#8C8A88] hover:text-[#E2765A] transition-all"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteChat(chat.id);
-                      }}
-                    />
-                  </div>
-                ))
+                chats.map((chat, index) => {
+                  const isActive = activeChatId === chat.id && activeView === 'chat';
+                  const isWorking = isActive && isThinking;
+                  const isMenuOpen = menuState?.id === chat.id;
+
+                  return (
+                    <div
+                      key={chat.id}
+                      onClick={() => { loadChat(chat.id); setActiveView('chat'); }}
+                      className={`w-full text-left px-3 transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] flex items-center justify-between group cursor-pointer active:scale-[0.98] ${ isActive ? 'bg-[#181818]/80 backdrop-blur-xl border border-white/[0.08] text-[#E8E6E3] font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.5)] rounded-[12px] py-3 text-[13.5px] relative z-10 overflow-visible' : 'py-2.5 text-[13px] rounded-lg border border-transparent text-[#A3A19E] hover:bg-white/5 active:bg-white/10 hover:text-[#E8E6E3] relative z-0' }`}
+                    >
+                      {isWorking ? (
+                        <motion.span
+                          animate={{ backgroundPosition: ["200% 50%", "-200% 50%"] }}
+                          transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                          style={{ backgroundSize: '300% auto' }}
+                          className="truncate pr-2 relative z-10 bg-gradient-to-r from-[#555350] via-[#E8E6E3] to-[#555350] bg-clip-text text-transparent font-medium"
+                        >
+                          {chat.title}
+                        </motion.span>
+                      ) : (
+                        <span className="truncate pr-2 relative z-10 text-[#E8E6E3]">{chat.title}</span>
+                      )}
+                      
+                      {/* Modern right-side Loading 'Fume' with Custom Spinner */}
+                      {isWorking ? (
+                        <div className="absolute right-0 top-0 bottom-0 w-[4.5rem] bg-gradient-to-l from-[#181818] via-[#181818]/95 to-transparent pointer-events-none z-20 flex items-center justify-end pr-3">
+                          <div className="w-[14px] h-[14px] rounded-full border-[2px] border-[#1e3a8a] border-r-[#3b82f6] animate-[spin_0.8s_linear_infinite]" />
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <div 
+                            className={`p-1 rounded-md transition-colors ${isMenuOpen ? 'opacity-100 bg-white/10 text-[#E8E6E3]' : 'opacity-0 group-hover:opacity-100 text-[#8C8A88] hover:bg-white/10 hover:text-[#E8E6E3]'} transition-all relative z-40`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isMenuOpen) {
+                                setMenuState(null);
+                              } else {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const dropUp = rect.bottom + 240 > window.innerHeight;
+                                setMenuState({ id: chat.id, x: rect.right, y: dropUp ? rect.top : rect.bottom, dropUp });
+                              }
+                            }}
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -160,5 +208,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </motion.div>
       )}
     </AnimatePresence>
+
+    {menuState && typeof document !== 'undefined' && createPortal(
+      <div 
+        className="fixed inset-0 z-[999999]" 
+        onClick={(e) => { e.stopPropagation(); setMenuState(null); }}
+        onContextMenu={(e) => { e.stopPropagation(); setMenuState(null); }}
+      >
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0, y: menuState.dropUp ? 5 : -5, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              left: menuState.x + 8,
+              ...(menuState.dropUp ? { bottom: window.innerHeight - menuState.y + 4 } : { top: menuState.y + 4 }),
+            }}
+            className="w-48 bg-[#181818] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] py-1.5 flex flex-col"
+          >
+            <button className="w-full px-3 py-2 text-[13px] text-[#A3A19E] hover:text-[#E8E6E3] hover:bg-white/5 flex items-center gap-3 transition-colors text-left group/btn">
+              <Share className="w-3.5 h-3.5 text-[#8C8A88] group-hover/btn:text-[#E8E6E3]" /> Share
+            </button>
+            <button className="w-full px-3 py-2 text-[13px] text-[#A3A19E] hover:text-[#E8E6E3] hover:bg-white/5 flex items-center gap-3 transition-colors text-left group/btn">
+              <Edit2 className="w-3.5 h-3.5 text-[#8C8A88] group-hover/btn:text-[#E8E6E3]" /> Rename
+            </button>
+            <button className="w-full px-3 py-2 text-[13px] text-[#A3A19E] hover:text-[#E8E6E3] hover:bg-white/5 flex items-center gap-3 transition-colors text-left group/btn">
+              <Star className="w-3.5 h-3.5 text-[#8C8A88] group-hover/btn:text-[#E8E6E3]" /> Add to favorites
+            </button>
+            <button className="w-full px-3 py-2 text-[13px] text-[#A3A19E] hover:text-[#E8E6E3] hover:bg-white/5 flex items-center gap-3 transition-colors text-left justify-between group/btn">
+              <div className="flex items-center gap-3">
+                <FolderInput className="w-3.5 h-3.5 text-[#8C8A88] group-hover/btn:text-[#E8E6E3]" /> Move to project
+              </div>
+              <ChevronRight className="w-3.5 h-3.5 text-[#555350] group-hover/btn:text-[#8C8A88]" />
+            </button>
+            
+            <div className="h-[1px] w-full bg-white/5 my-1" />
+            
+            <button 
+              className="w-full px-3 py-2 text-[13px] text-[#EF4444]/90 hover:text-red-400 hover:bg-red-500/10 flex items-center gap-3 transition-colors text-left"
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteChat(menuState.id);
+                setMenuState(null);
+              }}
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </button>
+          </motion.div>
+        </AnimatePresence>
+      </div>,
+      document.body
+    )}
+    </>
   );
 };

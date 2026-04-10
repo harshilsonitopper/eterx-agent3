@@ -4,7 +4,7 @@ import './tools/index'; // Bootstrap all tools!
 import { ProjectContext } from './schemas';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { SKILL_REGISTRY } from './skills';
-import { workspaceIntelligence, agentReflection } from './engines';
+import { workspaceIntelligence } from './engines';
 import { agentMemory, ContextWindowManager } from './memory';
 import {
   intelligentCache, smartQueryRouter, knowledgeEngine,
@@ -58,7 +58,6 @@ export class GeminiAgentClient {
   private rotateKey() {
     this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
     this.initializeClient();
-    console.warn(`[GeminiClient] FAILED. Rotating to fallback API Key (Index ${ this.currentKeyIndex })`);
   }
 
   /**
@@ -73,7 +72,6 @@ export class GeminiAgentClient {
       this.modelName = 'gemma-4-31b-it';
       this.fallbackModel = 'gemma-4-31b-it';
     }
-    console.log(`[GeminiClient] 🎛️ Mode: ${ mode.toUpperCase() } → Model: ${ this.modelName }`);
   }
 
   /**
@@ -516,12 +514,47 @@ You have ${ toolCount } tools. Use them like a pro:
 - 10 pages = ~50+ content blocks  
 - Each paragraph MUST be 4-8 sentences of REAL, substantive content.
 
-━━━ THINKING RULES (ANTI-RECURSION + SUB-AGENT AWARENESS) ━━━
+
+━━━ COGNITIVE ARCHITECTURE (HOW YOU THINK) ━━━
+
+🧠 META-REASONING PROTOCOL:
+Your thinking follows this exact sequence for EVERY task:
+1. CLASSIFY → What type of task is this? (code | research | document | fix | question | follow-up)
+2. DECOMPOSE → Can this be split into independent parallel parts?
+3. ASSESS → What do I already know? What tool results do I already have?
+4. ACT → Execute the NEXT tool. No planning speeches.
+5. VERIFY → After each major action, mentally check: "Did this advance the task?"
+
+⚡ PRE-FLIGHT CHECKLIST (run mentally before EVERY tool call):
+□ Have I already called this tool with similar args? → SKIP
+□ Do I already have this data from a previous result? → USE IT
+□ Is this the highest-impact action right now? → If not, do the higher-impact one first
+□ Can this run in parallel with something else? → SPAWN sub-agents
+
+🎯 OUTPUT QUALITY GATE (before delivering final answer):
+Before you emit your final answer, mentally audit:
+□ Does this DIRECTLY answer what the user asked?
+□ Is the formatting clean (proper Markdown, blank lines around headings)?
+□ Did I actually DO the task, or just explain what I WOULD do?
+□ If files were created, did I verify they exist?
+□ Is there anything incomplete or placeholder-like?
+If ANY check fails, FIX IT before delivering. Do NOT deliver draft-quality work.
+
+━━━ AGGRESSIVE PARALLEL DETECTION ━━━
+On EVERY task with 2+ independent components, you MUST spawn sub-agents:
+- "Compare X vs Y" → 2 agents research X and Y simultaneously
+- "Build a full app" → frontend agent + backend agent + styling agent
+- "Write a report on A, B, and C" → 3 research agents, one per topic
+- "Analyze this data AND find benchmarks" → data agent + research agent
+
+RULE: If you notice yourself about to do Step 1, then Step 2, then Step 3 sequentially,
+and steps don't depend on each other → STOP. Spawn parallel agents instead.
+Sequential execution of independent tasks is a PERFORMANCE BUG.
+
+━━━ THINKING DISCIPLINE ━━━
 - Think ONCE per decision, then ACT. Maximum 2-3 sentences of reasoning.
 - ⚠️ NEVER think about the same thing twice. If you already reasoned about it, EXECUTE.
 - ⚠️ NEVER loop: "I should do X" → thinks more → "I should do X" → thinks more. STOP. Do X.
-- Your thinking should be: [Assess situation] → [Check: parallelizable?] → [Decide action] → [Execute tool]. That's it.
-- PARALLEL CHECK: On every complex task, ask yourself: "Are there 2+ independent parts I can send to sub-agents?" If YES, spawn them IMMEDIATELY instead of doing everything sequentially.
 - If you catch yourself re-analyzing, STOP thinking and call the next tool immediately.
 - DO NOT narrate your plan in thinking. Just decide and act.
 - When sub-agents are running, CONTINUE YOUR OWN WORK on other parts of the task. Don't idle.
@@ -682,6 +715,21 @@ MODE 4: CLEAR — Cleanup after collecting results
 \`\`\`
 spawn_sub_agent({ mode: "clear" })
 \`\`\`
+
+MODE 5: CONSENSUS — 3-Agent Debate Panel for High-Stakes Analysis
+\`\`\`
+spawn_sub_agent({
+  mode: "consensus",
+  tasks: [{ task: "Analyze whether Tesla stock is a buy, hold, or sell for Q3 2026" }]
+})
+\`\`\`
+→ Automatically spawns 3 agents with different cognitive lenses:
+  • Agent-Alpha (OPTIMIST): Focuses on opportunities, best-case scenarios
+  • Agent-Nova (SKEPTIC): Focuses on risks, edge cases, potential failures
+  • Agent-Bolt (REALIST): Focuses on practical constraints, balanced view
+→ Returns a SYNTHESIS PROMPT with all 3 perspectives for you to merge into one definitive answer.
+→ USE FOR: Financial analysis, security audits, strategic decisions, competitive analysis, risk assessment.
+→ This eliminates single-perspective bias and hallucination through adversarial debate.
 
 🔄 AGENT-TO-AGENT PROTOCOL:
 - Sub-agents write status files to .workspaces/agents/ (JSON)
@@ -1023,7 +1071,6 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     // so the agent can re-use tools like web_search across different messages
     const callHistory = new Set<string>(); // Fresh dedup per message
     const toolCallCounts = new Map<string, number>(); // Fresh counts per message
-    const categoryCallCounts = new Map<string, number>(); // Fresh counts per message
     const loadedSkills = sessionHydrated ? sessionState.loadedSkills : new Set<string>();
     const writtenFiles = sessionHydrated ? sessionState.writtenFiles : new Set<string>();
     let interactions = 0;
@@ -1037,49 +1084,18 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
     // Clear stale cache from previous messages so fresh results are always used
     intelligentCache.clear();
 
-    // Category definitions for rate limiting
-    const toolCategories: Record<string, string> = {
-      web_search: 'research', web_scraper: 'research',
-      rss_feed_reader: 'research', youtube_transcript: 'research',
-      get_skill_guidelines: 'skill_loading',
-      task_decomposer: 'decomposition',
-      workspace_write_file: 'file_write', workspace_edit_file: 'file_edit',
-      workspace_read_file: 'file_read', workspace_list_directory: 'file_read',
-      desktop_notification: 'notification',
-    };
-
-    // Category limits — will be scaled for complex tasks after intent is classified
-    let categoryLimits: Record<string, number> = {
-      research: 4,
-      skill_loading: 3,
-      decomposition: 1,
-      notification: 2,
-      file_write: 15,
-      file_edit: 15,
-      file_read: 10,
-    };
-
     // === SMART QUERY ROUTING: Analyze the query for optimal strategy ===
     const queryAnalysis = smartQueryRouter.analyze(message);
     const routingHint = smartQueryRouter.getRoutingHint(queryAnalysis);
-    if (routingHint) {
-      console.log(`[GeminiClient] 🧭 Route: ${ queryAnalysis.strategy } | Complexity: ${ queryAnalysis.complexity } | Steps: ~${ queryAnalysis.estimatedSteps }`);
-    }
 
     // === INTENT CLASSIFICATION: Understand what user really wants ===
     const intent = intentClassifier.classify(message);
     const intentHint = intentClassifier.getIntentHint(intent);
-    if (intentHint) {
-      console.log(`[GeminiClient] 🎯 Intent: ${ intent.primaryIntent } | Scope: ${ intent.scope } | Urgency: ${ intent.urgency }`);
-    }
 
     // === ADAPTIVE LEARNING: Get tool recommendations from history ===
     adaptiveLearning.load().catch(() => { });
     const taskType = adaptiveLearning.classifyTask(message);
     const learningContext = adaptiveLearning.getLearningContext(message);
-    if (learningContext) {
-      console.log(`[GeminiClient] 🧠 Adaptive: Task type "${ taskType }" — recommendations loaded`);
-    }
 
     // Initialize knowledge engine (lazy, first call only)
     knowledgeEngine.load().catch(() => { });
@@ -1234,24 +1250,8 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
       };
     }
 
-    // === ADAPTIVE MAX ITERATIONS: Scale based on task complexity ===
-    let maxLoopIterations = 30; // default
-    if (intent.scope === 'quick') maxLoopIterations = 15;
-    else if (intent.scope === 'moderate') maxLoopIterations = 30;
-    else if (intent.scope === 'large') maxLoopIterations = 50;
-    else if (intent.scope === 'project') maxLoopIterations = 60;
-    // If task decomposer was used (complex task), bump up
-    if (taskDecomposerUsed) maxLoopIterations = Math.max(maxLoopIterations, 50);
-    console.log(`[GeminiClient] 🔄 Max iterations: ${ maxLoopIterations } (scope: ${ intent.scope })`);
-
-    // Scale category limits for complex tasks (now that intent is available)
-    if (intent.scope === 'large' || intent.scope === 'project') {
-      categoryLimits = {
-        ...categoryLimits,
-        research: 8, skill_loading: 5,
-        file_write: 30, file_edit: 30, file_read: 20,
-      };
-    }
+    // === UNLIMITED ITERATIONS — agent works until done or user stops ===
+    const maxLoopIterations = 999999;
 
     // Track accumulated text at loop level for fallback message
     let loopAccumulatedText = '';
@@ -1360,6 +1360,8 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
       const allResponseParts: any[] = [];
 
       for await (const chunk of stream) {
+        // Instant cancel check during streaming
+        if (isCancelled()) break;
         const candidates = chunk.candidates;
         if (!candidates || candidates.length === 0) continue;
 
@@ -1405,38 +1407,35 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         noToolCallStreak++;
 
         if (accumulatedText) {
-          // === REFLECTION: Self-evaluate before delivery ===
-          const toolsUsed = Array.from(callHistory).map(s => s.split(':')[0]);
-          const reflection = await agentReflection.reflect(message, accumulatedText, toolsUsed);
-
-          if (reflection.suggestions.length > 0) {
-            console.log(`[GeminiClient] 🪞 Reflection: ${ reflection.quality } quality`);
-            reflection.suggestions.forEach(s => console.log(`   → ${ s }`));
-          }
-
-          // Final answer — emit
+          // Final answer — emit immediately, no reflection/critic overhead
           const finalText = accumulatedText;
-          loopAccumulatedText = finalText; // Track for fallback
+          loopAccumulatedText = finalText;
           const answerEvt = { type: 'answer', text: finalText };
           const existingIdx = trace.findIndex(t => t.type === 'answer');
           if (existingIdx >= 0) trace[existingIdx] = answerEvt;
           else trace.push(answerEvt);
           if (onTrace) onTrace(answerEvt);
 
-          // Reset reflection counter for next message
-          agentReflection.reset();
-
-          // === ADAPTIVE LEARNING: Record this interaction for future improvement ===
+          // Background learning (non-blocking)
           const toolsUsedList = Array.from(callHistory).map(s => s.split(':')[0]);
-          const taskDuration = Date.now() - (Date.now() - interactions * 2000); // Approximate
-          adaptiveLearning.recordTask(message, toolsUsedList, true, taskDuration).catch(() => { });
-
-          // Log performance stats
-          const perfStats = performanceAnalytics.getSummary();
-          console.log(`[GeminiClient] 📊 Session stats: ${ perfStats.totalToolCalls } tool calls | ${ perfStats.overallSuccessRate } success rate`);
-
-          // Store final output in session for self-review on continuation
+          adaptiveLearning.recordTask(message, toolsUsedList, true, interactions * 2000).catch(() => { });
           globalSessionManager.setLastAgentOutput(finalText);
+
+          // === AUTONOMOUS TOOL SYNTHESIS: Detect repeating patterns ===
+          try {
+            const toolSequence = toolsUsedList.filter((t, i, arr) => arr.indexOf(t) === i); // dedup
+            // If the agent used 5+ different tools, check for common multi-step patterns
+            if (toolSequence.length >= 5) {
+              // Find 3-step windows that repeat across recent tasks
+              const patternKey = toolSequence.slice(0, 3).join('→');
+              const existingPatterns = (adaptiveLearning as any).getRepeatingPatterns?.() || [];
+              if (existingPatterns.includes(patternKey)) {
+                console.log(`[GeminiClient] 🧬 PATTERN DETECTED: "${patternKey}" repeats across tasks. Consider create_dynamic_tool.`);
+                // Inject a hint into the session for next time
+                globalSessionManager.addAction(`[AUTO-INSIGHT] Repeating tool pattern detected: ${patternKey}. Consider creating a macro tool.`);
+              }
+            }
+          } catch { /* silent — pattern detection is optional */ }
 
           return { text: finalText, trace };
         }
@@ -1621,10 +1620,8 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           };
         }
 
-        // === ENHANCED DEDUP CHECK ===
-        // 1. Semantic dedup (catches rephrased queries)
+        // === DEDUP CHECK (semantic only — no hard limits) ===
         if (this.isSemanticallyDuplicate(normalizedSig, callHistory)) {
-          console.warn(`[GeminiClient] 🚫 BLOCKED DUPLICATE: ${ call.name } (semantic match)`);
           return {
             functionResponse: {
               name: call.name,
@@ -1634,56 +1631,9 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
           };
         }
 
-        // 2. Per-tool call cap
+        // Track call count (no limits — just tracking)
         const currentCount = (toolCallCounts.get(call.name) || 0) + 1;
         toolCallCounts.set(call.name, currentCount);
-
-        const perToolLimits: Record<string, number> = {
-          task_decomposer: 1,
-          web_search: 3,
-          web_scraper: 3,
-          get_skill_guidelines: 3,
-          desktop_notification: 2,
-          // ═══ DEEP GENERATION WORKFLOW SUPPORT ═══
-          // The agent must be allowed to heavily repeatedly call file I/O tools
-          // for continuous auto-chunking (e.g., generating 25 pages over 10-15 passes)
-          workspace_write_file: 50,
-          workspace_edit_file: 50,
-          workspace_read_file: 50,
-          workspace_list_directory: 50,
-          docx_generator: 50,
-        };
-        const maxCalls = perToolLimits[call.name] || 15;
-
-        if (currentCount > maxCalls) {
-          console.warn(`[GeminiClient] 🚫 TOOL CAP: ${ call.name } hit ${ currentCount }/${ maxCalls }`);
-          return {
-            functionResponse: {
-              name: call.name,
-              response: { output: { error: `TOOL LIMIT REACHED for ${ call.name }. You've called it ${ currentCount } times. DO NOT call it again. Use the results you already have and MOVE FORWARD to the next step.` } },
-              ...(call.id ? { id: call.id } : {})
-            }
-          };
-        }
-
-        // 3. Category-level cap
-        const category = toolCategories[call.name];
-        if (category) {
-          const catCount = (categoryCallCounts.get(category) || 0) + 1;
-          categoryCallCounts.set(category, catCount);
-          const catLimit = categoryLimits[category] || 20;
-
-          if (catCount > catLimit) {
-            console.warn(`[GeminiClient] 🚫 CATEGORY CAP: ${ category } hit ${ catCount }/${ catLimit }`);
-            return {
-              functionResponse: {
-                name: call.name,
-                response: { output: { error: `CATEGORY LIMIT REACHED for "${ category }" tools. You've used ${ catCount } calls in this category. STOP researching/loading and START building.` } },
-                ...(call.id ? { id: call.id } : {})
-              }
-            };
-          }
-        }
 
         // 4. Skill dedup — track loaded skills specifically
         if (call.name === 'get_skill_guidelines') {
@@ -1727,6 +1677,16 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
         callHistory.add(normalizedSig);
         if (call.name === 'task_decomposer') {
           taskDecomposerUsed = true;
+        }
+        // Cancellation check before executing each tool
+        if (isCancelled()) {
+          return {
+            functionResponse: {
+              name: call.name,
+              response: { output: { error: 'Cancelled by user.' } },
+              ...(call.id ? { id: call.id } : {})
+            }
+          };
         }
         console.log(`[GeminiClient] ⚡ ${ call.name } (#${ currentCount })`);
         const tool = globalToolRegistry.getTool(call.name);
@@ -1901,7 +1861,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
       const functionResponseParts = await Promise.all(executionPromises);
 
       // Push all function responses back to contents
-      console.log(`[GeminiClient] ⚡ ${ functionResponseParts.length } tools completed (parallel). Returning to Gemini.`);
+      if (functionResponseParts.length > 1) console.log(`[GeminiClient] ⚡ ${ functionResponseParts.length } tools completed (parallel).`);
 
       // Push tool responses back to contents — clean, no fake function injections
       contents.push({ role: 'user', parts: functionResponseParts });
@@ -1909,7 +1869,7 @@ Files: ${ (context.uploadedFiles || []).join(', ') || 'None' }${ prefsContext }$
       // === SESSION PERSISTENCE: Save state after each tool round ===
       globalSessionManager.updateFromLoop({
         callHistory, writtenFiles, loadedSkills,
-        taskDecomposerUsed, toolCallCounts, categoryCallCounts
+        taskDecomposerUsed, toolCallCounts
       });
       globalSessionManager.save().catch(() => { });
     }

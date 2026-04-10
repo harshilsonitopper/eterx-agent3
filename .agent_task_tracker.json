@@ -1,137 +1,105 @@
 {
-  "goal": "Build an SAT-versus-ACT decision engine for students navigating the current digital SAT and the updated ACT. Use official timing, section structure, adaptive SAT practice behavior, answer-key availability, and score concordance to estimate which test gives a student the better odds of a top-score jump. Then generate a six-week prep plan that reallocates study time after every practice test instead of following a generic schedule. Output it as a website with a parent-friendly PDF study plan.",
-  "createdAt": 1775665848865,
-  "complexity": "complex",
-  "estimatedMinutes": 120,
+  "goal": "Research and document \"missing\" or overlooked conspiracy theories and unsolved mysteries. The goal is to find conspiracies that are not commonly discussed in mainstream media but have significant theories or evidence surrounding them. The final output should be a comprehensive, professional report in .docx format saved to the Desktop.",
+  "createdAt": 1775798271916,
+  "complexity": "moderate",
+  "estimatedMinutes": 10,
   "status": "in_progress",
   "steps": [
     {
       "id": "step_1",
       "step": 1,
-      "name": "Research test specifications",
-      "description": "Use web_search to gather current 2026 digital SAT and updated ACT section timings, scoring scales, and official concordance tables.",
+      "name": "Understand & Plan",
+      "description": "Analyze the task requirements and determine the approach",
       "tools": [
         "web_search"
       ],
-      "done_when": "Data on SAT/ACT timing, scoring, and concordance is collected.",
+      "done_when": "Requirements understood and approach clear",
       "depends_on": [],
       "priority": "high",
       "status": "done",
-      "completedAt": 1775665912749
+      "completedAt": 1775798285051
     },
     {
       "id": "step_2",
       "step": 2,
-      "name": "Create decision engine logic",
-      "description": "Write a JavaScript file 'decision_engine.js' that takes user input (practice scores, speed, math/verbal preference) and calculates the test with higher potential for a top-score jump based on concordance.",
+      "name": "Setup Environment",
+      "description": "Create any needed directories, files, or configurations",
       "tools": [
+        "system_shell",
         "workspace_write_file"
       ],
-      "done_when": "decision_engine.js is created with functional logic.",
+      "done_when": "Environment ready for implementation",
       "depends_on": [
-        "step 1"
+        1
       ],
       "priority": "high",
       "status": "done",
-      "completedAt": 1775665974436
+      "completedAt": 1775798302970
     },
     {
       "id": "step_3",
       "step": 3,
-      "name": "Create adaptive scheduler logic",
-      "description": "Write 'scheduler.js' that calculates a 6-week study plan, reallocating hours based on weak points identified after each mock test input.",
+      "name": "Implement Core",
+      "description": "Create the main output files with complete content",
       "tools": [
         "workspace_write_file"
       ],
-      "done_when": "scheduler.js is created with adaptive reallocation logic.",
+      "done_when": "Core implementation files created",
       "depends_on": [
-        "step 1"
+        2
       ],
       "priority": "high",
       "status": "done",
-      "completedAt": 1775665974437
+      "completedAt": 1775798380379
     },
     {
       "id": "step_4",
       "step": 4,
-      "name": "Build website structure",
-      "description": "Write 'index.html' with a clean, parent-friendly UI for inputting scores and displaying the test recommendation.",
+      "name": "Implement Details",
+      "description": "Create supporting files, styles, data, and logic",
       "tools": [
         "workspace_write_file"
       ],
-      "done_when": "index.html is created with input forms and output containers.",
-      "depends_on": [],
-      "priority": "medium",
+      "done_when": "All supporting files created",
+      "depends_on": [
+        3
+      ],
+      "priority": "high",
       "status": "done",
-      "completedAt": 1775666008330
+      "completedAt": 1775798380380
     },
     {
       "id": "step_5",
       "step": 5,
-      "name": "Style the website",
-      "description": "Write 'style.css' to ensure a professional, responsive layout for the decision engine and plan viewer.",
+      "name": "Verify & Polish",
+      "description": "Review output, fix issues, and ensure quality",
       "tools": [
-        "workspace_write_file"
+        "workspace_read_file",
+        "workspace_edit_file"
       ],
-      "done_when": "style.css is created and linked to index.html.",
+      "done_when": "Output verified and polished",
       "depends_on": [
-        "step 4"
+        4
       ],
-      "priority": "low",
+      "priority": "high",
       "status": "done",
-      "completedAt": 1775666008330
+      "completedAt": 1775800200710
     },
     {
       "id": "step_6",
       "step": 6,
-      "name": "Integrate frontend logic",
-      "description": "Write 'app.js' to connect the UI inputs to the decision_engine.js and scheduler.js logic.",
+      "name": "Deliver",
+      "description": "Finalize and notify user of completion",
       "tools": [
-        "workspace_write_file"
+        "desktop_notification"
       ],
-      "done_when": "app.js is functional and connected to the HTML.",
+      "done_when": "User notified",
       "depends_on": [
-        "step 2",
-        "step 3",
-        "step 4"
+        5
       ],
-      "priority": "high",
+      "priority": "low",
       "status": "done",
-      "completedAt": 1775666054305
-    },
-    {
-      "id": "step_7",
-      "step": 7,
-      "name": "Generate PDF template",
-      "description": "Use docx_generator to create a professional PDF template for the 6-week study plan that can be populated with the engine's output.",
-      "tools": [
-        "docx_generator"
-      ],
-      "done_when": "study_plan_template.docx is generated.",
-      "depends_on": [
-        "step 3"
-      ],
-      "priority": "medium",
-      "status": "done",
-      "completedAt": 1775666078982
-    },
-    {
-      "id": "step_8",
-      "step": 8,
-      "name": "Verify code",
-      "description": "Run workspace_verify_code on all created JS files to ensure no syntax errors.",
-      "tools": [
-        "workspace_verify_code"
-      ],
-      "done_when": "All files pass verification.",
-      "depends_on": [
-        "step 2",
-        "step 3",
-        "step 6"
-      ],
-      "priority": "high",
-      "status": "pending",
-      "completedAt": null
+      "completedAt": 1775803208909
     }
   ]
 }

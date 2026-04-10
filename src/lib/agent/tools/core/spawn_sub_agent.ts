@@ -1,52 +1,48 @@
 import { z } from 'zod';
 import { ToolDefinition } from '../../schemas';
-import { globalSubAgentSpawner, agentMessageBus, SubAgentName } from '../../roles/sub_agent';
+import { globalSubAgentSpawner, agentMessageBus, SubAgentName, getPendingResults, hasPendingResults } from '../../roles/sub_agent';
 
 /**
- * Spawn Sub-Agent Tool — Full-Power Parallel Agent Spawner
- * + Agent-to-Agent Protocol
+ * Spawn Sub-Agent Tool v2 — Fire-and-Forget Parallel Agent Spawner
  * 
- * The main agent uses this to spawn parallel workers when it identifies
- * independent tasks. Sub-agents are FULL CLONES with ALL tools.
+ * KEY CHANGE: "spawn" mode now returns IMMEDIATELY with agent names.
+ * The main agent continues working while sub-agents run in the background.
+ * The main agent calls "collect" later to get results.
+ * 
+ * This means the main agent is NEVER blocked waiting for sub-agents.
+ * It can do its own work in parallel.
  * 
  * MODES:
- * - spawn: Launch sub-agents (parallel or single). Returns immediately with agent names.
- * - status: Check what sub-agents are doing right now (read their progress).
- * - collect: Get final results from completed sub-agents (full content + trace log).
+ * - spawn: Fire-and-forget launch. Returns immediately with agent names.
+ * - status: Check what sub-agents are doing right now.
+ * - collect: Get results from completed sub-agents (blocks until done).
  * - clear: Clean up completed agent files.
- * 
- * AGENT-TO-AGENT PROTOCOL:
- * The main agent spawns sub-agents → sub-agents write progress to .workspaces/agents/ → 
- * main agent can check status or collect results at any time.
- * 
- * WHEN TO USE:
- * - Multiple INDEPENDENT tasks that don't depend on each other
- * - Deep research + coding can happen simultaneously
- * - File creation in different dirs can be parallelized
- * - NOT for sequential/dependent tasks — do those in order yourself
  */
 export const spawnSubAgentTool: ToolDefinition = {
   name: 'spawn_sub_agent',
   description: `Spawn full-power sub-agents for parallel execution, check their status, or collect results.
 
 MODES:
-- "spawn": Launch 1+ sub-agents in parallel. They have ALL tools (same as you). Give each a clear, detailed task. Returns agent names for tracking.
-- "status": Check what sub-agents are doing right now. Returns their current progress and trace logs.
-- "collect": Get final results from completed sub-agents. Returns their full output and what they did.
+- "spawn": FIRE-AND-FORGET launch. Returns immediately with agent names. Sub-agents run in the background with separate API keys. You MUST continue doing YOUR OWN work after spawning — do NOT wait.
+- "status": Check what sub-agents are doing right now. Returns their current progress.
+- "collect": Get final results from completed sub-agents. Call this ONLY when you need their output.
 - "clear": Clean up completed agent data files.
 
 NAMED AGENTS: Agent-Alpha, Agent-Nova, Agent-Bolt, Agent-Cipher, Agent-Forge, Agent-Pulse, Agent-Nexus, Agent-Arc, Agent-Sentinel, Agent-Echo
 
-WORKFLOW:
-1. Call with mode="spawn" and your tasks
-2. Continue YOUR OWN work while sub-agents run
+CRITICAL WORKFLOW:
+1. Call with mode="spawn" — returns instantly with agent names
+2. IMMEDIATELY continue YOUR OWN tasks (the whole point is parallel work!)
 3. When you need their results, call mode="collect"
+4. Merge sub-agent results with your own work for final output
 
-WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output). Example: researching topic A while writing code for topic B.`,
+WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output). Example: researching topic A while writing code for topic B.
+WHEN TO USE CONSENSUS: For high-stakes analysis (stock comparison, security audits, strategic decisions). Spawns 3 agents with different cognitive lenses (Optimist/Skeptic/Realist) to eliminate bias.
+IMPORTANT: After spawning, you MUST immediately start working on your own tasks. Do NOT call mode="status" in a loop — just keep working and collect when ready.`,
   category: 'core',
   inputSchema: z.object({
-    mode: z.enum(['spawn', 'status', 'collect', 'clear'])
-      .describe('spawn = launch agents, status = check progress, collect = get results, clear = cleanup'),
+    mode: z.enum(['spawn', 'status', 'collect', 'clear', 'consensus'])
+      .describe('spawn = fire-and-forget launch, status = check progress, collect = get results, clear = cleanup, consensus = 3-agent debate panel for high-stakes analysis'),
     tasks: z.array(z.object({
       task: z.string().describe('Detailed task description for this sub-agent'),
       name: z.string().optional().describe('Optional agent name (auto-assigned if not provided)')
@@ -63,13 +59,11 @@ WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output).
     tasks?: Array<{ task: string, name?: string }>,
     agentName?: string
   }, context: any) => {
-    console.log(`[Tool: spawn_sub_agent] Mode: ${ input.mode }`);
-
     // Extract the UI trace callback from context (injected by gemini.ts)
     const onTrace = context?._onTrace as ((t: any) => void) | undefined;
 
     switch (input.mode) {
-      // ═══ SPAWN: Launch sub-agents in parallel ═══
+      // ═══ SPAWN: Fire-and-forget launch ═══
       case 'spawn': {
         if (!input.tasks || input.tasks.length === 0) {
           return { mode: 'spawn', agents: [], message: 'ERROR: No tasks provided. Pass tasks array with {task, name?} objects.' };
@@ -80,11 +74,10 @@ WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output).
           name: t.name as SubAgentName | undefined
         }));
 
-        // Build parent context — what the main agent knows so far
-        const parentContext = `Main agent spawned ${ taskList.length } parallel sub-agents. Each agent works independently on its assigned task.`;
+        const parentContext = `Main agent spawned ${ taskList.length } parallel sub-agents. Each agent works independently on its assigned task. Do NOT mark the full project as complete — you are only doing YOUR assigned part.`;
 
-        // Spawn all agents in parallel — pass onTrace so sub-agent activity streams to the UI live
-        const results = await globalSubAgentSpawner.spawnParallel(
+        // Fire-and-forget: returns immediately
+        const { agentNames, message } = globalSubAgentSpawner.spawnParallelFireAndForget(
           taskList,
           context,
           parentContext,
@@ -93,14 +86,9 @@ WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output).
 
         return {
           mode: 'spawn',
-          agents: results.results.map(r => ({
-            name: r.name,
-            success: r.success,
-            durationMs: r.durationMs,
-            resultPreview: r.result.substring(0, 500)
-          })),
-          message: `Spawned ${ results.results.length } agents. ${ results.successCount } succeeded, ${ results.failCount } failed. Total time: ${ (results.totalDurationMs / 1000).toFixed(1) }s.`,
-          fullResults: results.results
+          agents: agentNames.map(name => ({ name, status: 'spawning' })),
+          message: message + '\n\nIMPORTANT: You MUST now continue working on YOUR OWN tasks. Do NOT wait or poll for sub-agent status. They will work in the background with their own API keys. Call mode="collect" only when you need their output.',
+          spawnedAgentNames: agentNames
         };
       }
 
@@ -124,7 +112,9 @@ WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output).
           };
         }
 
-        // Get all agent statuses
+        // Check for queued results first
+        const queuedCount = hasPendingResults() ? 'Some agents have finished — call "collect" to get results.' : '';
+        
         const allStatuses = await agentMessageBus.readAllStatuses();
         const agents = Object.entries(allStatuses).map(([name, data]: [string, any]) => ({
           name,
@@ -138,13 +128,19 @@ WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output).
           mode: 'status',
           agents,
           message: agents.length > 0
-            ? `${ agents.length } agents tracked. ${ agents.filter((a: any) => a.status === 'running').length } running, ${ agents.filter((a: any) => a.status === 'completed').length } completed.`
+            ? `${ agents.length } agents tracked. ${ agents.filter((a: any) => a.status === 'running').length } running, ${ agents.filter((a: any) => a.status === 'completed').length } completed. ${ queuedCount }`
             : 'No active sub-agents.'
         };
       }
 
       // ═══ COLLECT: Get final results from completed sub-agents ═══
       case 'collect': {
+        // First wait for all background agents to finish
+        await globalSubAgentSpawner.waitForAll();
+        
+        // Get queued results
+        const queuedResults = getPendingResults();
+        
         if (input.agentName) {
           const status = await agentMessageBus.readAgentStatus(input.agentName);
           if (!status) {
@@ -164,7 +160,7 @@ WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output).
           };
         }
 
-        // Collect ALL completed results
+        // Collect ALL results — from both queue and disk
         const allStatuses = await agentMessageBus.readAllStatuses();
         const agents = Object.entries(allStatuses).map(([name, data]: [string, any]) => ({
           name,
@@ -175,10 +171,13 @@ WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output).
           durationMs: data.completedAt ? data.completedAt - data.startedAt : null
         }));
 
+        const completedAgents = agents.filter((a: any) => a.status === 'completed');
+
         return {
           mode: 'collect',
           agents,
-          message: `Collected data from ${ agents.length } agents. ${ agents.filter((a: any) => a.status === 'completed').length } completed with results.`
+          message: `Collected from ${ agents.length } agents. ${ completedAgents.length } completed with results. ${ agents.filter((a: any) => a.status === 'running').length } still running.\n\nNow merge these results with your own work to create the final output.`,
+          completedResults: completedAgents
         };
       }
 
@@ -186,6 +185,27 @@ WHEN TO SPAWN: Only when tasks are INDEPENDENT (don't need each other's output).
       case 'clear': {
         await agentMessageBus.clearAll();
         return { mode: 'clear', agents: [], message: 'All sub-agent data cleared.' };
+      }
+
+      // ═══ CONSENSUS: 3-Agent Debate Panel ═══
+      case 'consensus': {
+        if (!input.tasks || input.tasks.length === 0) {
+          return { mode: 'consensus', agents: [], message: 'ERROR: No task provided. Pass tasks array with at least one {task} describing the analysis needed.' };
+        }
+
+        const consensusTask = input.tasks[0].task; // Use the first task as the consensus topic
+        const consensusResult = await globalSubAgentSpawner.spawnConsensus(
+          consensusTask,
+          {} as any, // Context will be built by the spawner
+          onTrace
+        );
+
+        return {
+          mode: 'consensus',
+          agents: consensusResult.perspectives,
+          message: consensusResult.synthesisPrompt,
+          totalDurationMs: consensusResult.totalDurationMs
+        };
       }
 
       default:

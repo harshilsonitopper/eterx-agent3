@@ -114,39 +114,75 @@ const getLogStyle = (text: string, type: string, iconName?: string) => {
 };
 
 /**
- * Robust typewriter hook for thought streaming.
- * Uses character-level tracking with refs to avoid stale closure issues.
- * When new text arrives mid-animation, it seamlessly continues from where it was.
- * No flashing, no resetting.
+ * Global registry: tracks the max revealed character count for each text blob.
+ * Keyed by the first 80 chars of text (unique enough to avoid collisions).
+ * When a component re-mounts, it resumes from where it was — no replay.
+ */
+const displayedTextRegistry = new Map<string, number>();
+
+/**
+ * Robust typewriter hook for thought streaming — REPLAY-PROOF.
+ * 
+ * KEY DESIGN:
+ * - On mount, checks if this text was already partially/fully displayed before.
+ *   If yes, starts from the previously revealed position (no re-animation).
+ * - Only genuinely NEW characters (appended via streaming) get the typing effect.
+ * - When isActive=false, snaps to full text immediately (no animation).
+ * - Cleanup: automatically prunes old registry entries to prevent memory leaks.
  */
 const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'medium' | 'slow' = 'fast') => {
-  // Use refs to avoid stale closures in setInterval
-  // Initialize at full length if not active, so re-mounts never "replay"
-  const revealedCountRef = useRef(isActive ? 0 : targetText.length);
+  // Registry key: first 80 chars (unique enough, stable across re-renders)
+  const registryKey = targetText.slice(0, 80);
+
+  // On mount: start from previously revealed position, or full length if not active
+  const getInitialCount = () => {
+    if (!isActive) return targetText.length;
+    const prev = displayedTextRegistry.get(registryKey) || 0;
+    // If we've seen this text before, start from where we left off
+    return Math.min(prev, targetText.length);
+  };
+
+  const revealedCountRef = useRef(getInitialCount());
   const targetTextRef = useRef(targetText);
   const [, forceRender] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevLengthRef = useRef(isActive ? 0 : targetText.length);
+  const prevLengthRef = useRef(revealedCountRef.current);
 
-  // Sync the latest text so the running interval always sees the dynamic length
+  // Sync the latest text ref
   targetTextRef.current = targetText;
 
-  // Fluctuating characters per tick for natural feel (avg ~4)
   const getCharsPerTick = () => {
     const base = speed === 'fast' ? 4 : speed === 'medium' ? 2 : 1;
     const variance = Math.max(1, Math.floor(base * 0.6));
-    return base + Math.floor(Math.random() * (variance * 2 + 1)) - variance; // e.g. fast: 2-6
+    return base + Math.floor(Math.random() * (variance * 2 + 1)) - variance;
   };
   const tickMs = speed === 'fast' ? 12 : speed === 'medium' ? 20 : 35;
 
+  // Update registry whenever we reveal more
+  const updateRegistry = (count: number) => {
+    const current = displayedTextRegistry.get(registryKey) || 0;
+    if (count > current) {
+      displayedTextRegistry.set(registryKey, count);
+    }
+    // Prune old entries if registry gets too large (>500 entries)
+    if (displayedTextRegistry.size > 500) {
+      const keys = Array.from(displayedTextRegistry.keys());
+      for (let i = 0; i < 200; i++) {
+        displayedTextRegistry.delete(keys[i]);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!isActive) {
+      // Not active — snap to full text, no animation
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
       revealedCountRef.current = targetText.length;
       prevLengthRef.current = targetText.length;
+      updateRegistry(targetText.length);
       forceRender(n => n + 1);
       return;
     }
@@ -154,31 +190,38 @@ const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'm
     const targetLen = targetText.length;
     const prevLen = prevLengthRef.current;
 
+    // Text was replaced with something much shorter — snap (new topic)
     if (targetLen < prevLen * 0.5 && prevLen > 20) {
       revealedCountRef.current = targetLen;
       prevLengthRef.current = targetLen;
+      updateRegistry(targetLen);
       forceRender(n => n + 1);
       return;
     }
 
+    // Our count exceeds current text — clamp
     if (revealedCountRef.current > targetLen) {
       revealedCountRef.current = targetLen;
       prevLengthRef.current = targetLen;
+      updateRegistry(targetLen);
       forceRender(n => n + 1);
       return;
     }
 
     prevLengthRef.current = targetLen;
 
+    // Already fully revealed — no animation needed
     if (revealedCountRef.current >= targetLen) return;
 
-    if (timerRef.current) return; // Keep running the unified interval
+    // Start typing animation only if not already running
+    if (timerRef.current) return;
 
     timerRef.current = setInterval(() => {
       revealedCountRef.current = Math.min(
         revealedCountRef.current + getCharsPerTick(),
-        targetTextRef.current.length // Real-time updated sync from the ref!
+        targetTextRef.current.length
       );
+      updateRegistry(revealedCountRef.current);
       forceRender(n => n + 1);
 
       if (revealedCountRef.current >= targetTextRef.current.length) {
@@ -197,14 +240,15 @@ const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'm
     };
   }, [targetText, isActive]);
 
+  // Handle new text arriving after timer finished
   useEffect(() => {
     if (isActive && timerRef.current === null && revealedCountRef.current < targetText.length) {
-      // New text arrived after timer randomly finished — restart unified animation sync
       timerRef.current = setInterval(() => {
         revealedCountRef.current = Math.min(
           revealedCountRef.current + getCharsPerTick(),
           targetTextRef.current.length
         );
+        updateRegistry(revealedCountRef.current);
         forceRender(n => n + 1);
 
         if (revealedCountRef.current >= targetTextRef.current.length) {
@@ -215,15 +259,12 @@ const useTypewriter = (targetText: string, isActive: boolean, speed: 'fast' | 'm
         }
       }, tickMs);
     }
-
-    return () => {
-      // Don't clear on every text change — only on unmount
-    };
   }, [targetText.length, isActive]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount — save final position to registry
   useEffect(() => {
     return () => {
+      updateRegistry(revealedCountRef.current);
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -252,11 +293,11 @@ export const ProfessionalThought = ({ text, isLatest, isThinking, variant = 'tho
   const renderText = useMemo(() => {
     if (!rawText) return rawText;
     let fixed = rawText;
-    
+
     // aggressively scrub hallucinations mimicking system prompts
     fixed = fixed.replace(/!\[.*?\]\(\/absolute.*?\.png\)/gi, '');
     fixed = fixed.replace(/<\/?thought>/gi, '');
-    
+
     // Fix inline headings: any text immediately before # (with or without newline)
     fixed = fixed.replace(/([^\n])(#{1,6}\s)/g, '$1\n\n$2');
     // Fix headings after period/punctuation without blank line
@@ -267,7 +308,7 @@ export const ProfessionalThought = ({ text, isLatest, isThinking, variant = 'tho
     fixed = fixed.replace(/([.!?:])(\s*\n)?(\d+\.\s)/g, '$1\n\n$3');
     // Ensure blank line before headings that have just a single \n
     fixed = fixed.replace(/([^\n])\n(#{1,6}\s)/g, '$1\n\n$2');
-    
+
     return fixed.trim();
   }, [rawText]);
 
@@ -348,7 +389,7 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
   const autoScrollEnabled = React.useRef(true);
   const [activeTab, setActiveTab] = useState<string>('Main');
 
-  const flowLogs = logs.filter(l => ['thought_stream', 'command', 'exploration', 'file_edit', 'safety_warning', 'communication', 'sub_agent_answer'].includes(l.type));
+  const flowLogs = logs.filter(l => ['thought_stream', 'command', 'exploration', 'file_edit', 'safety_warning', 'communication', 'sub_agent_answer', 'sub_agent_result'].includes(l.type));
 
   const getSubAgentStatus = (agentName: string) => {
     if (agentName === 'Main') {
@@ -361,7 +402,7 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
     const agentLogs = flowLogs.filter(l => l.subAgent === agentName);
     const lastLog = agentLogs[agentLogs.length - 1];
     if (!lastLog) return 'Initializing...';
-    if (lastLog.type === 'sub_agent_answer') return 'Completed task.';
+    if (lastLog.type === 'sub_agent_answer' || lastLog.type === 'sub_agent_result') return 'Completed ✓';
     if (lastLog.type === 'thought_stream') return 'Thinking';
     return lastLog.text || 'Working...';
   };
@@ -405,27 +446,27 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
     if (!start || !end) return '';
     const seconds = ((end - start) / 1000);
     if (seconds < 2) return '';
-    if (seconds > 60) return `${Math.floor(seconds / 60)}m ${(seconds % 60).toFixed(0)}s`;
-    return `${seconds.toFixed(1)}s`;
+    if (seconds > 60) return `${ Math.floor(seconds / 60) }m ${ (seconds % 60).toFixed(0) }s`;
+    return `${ seconds.toFixed(1) }s`;
   };
 
   const getDynamicThoughtHeading = () => {
     const mainLogs = flowLogs.filter(l => !l.subAgent);
     const duration = getDurationString();
-    const timeStr = duration && !isThinking ? ` for ${duration}` : '';
+    const timeStr = duration && !isThinking ? ` for ${ duration }` : '';
     const hasToolUse = mainLogs.some(l => l.type !== 'thought_stream');
 
     // If the latest log is a tool execution from the MAIN agent, vividly display it
     const lastLog = mainLogs[mainLogs.length - 1];
     if (lastLog && lastLog.type !== 'thought_stream') {
       if (lastLog.text?.includes('Spawning')) return 'Orchestrating agents...';
-      if (!isThinking) return `Worked${timeStr}`;
+      if (!isThinking) return `Worked${ timeStr }`;
       return lastLog.text + '...';
     }
 
     if (isThinking) return 'Thinking';
-    
-    return hasToolUse ? `Worked${timeStr}` : `Thought${timeStr}`;
+
+    return hasToolUse ? `Worked${ timeStr }` : `Thought${ timeStr }`;
   };
 
   const activitySummary = getDynamicThoughtHeading();
@@ -650,7 +691,7 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
                       );
                     }
 
-                    if (log.type === 'sub_agent_answer') {
+                    if (log.type === 'sub_agent_answer' || log.type === 'sub_agent_result') {
                       return (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
@@ -679,9 +720,9 @@ export const ThinkingProcess = ({ logs, isThinking, isLast }: { logs: any[], isT
                     return (
                       <motion.div
                         key={idx}
-                        initial={isLast ? { opacity: 0, x: -12, scale: 0.97 } : false}
+                        initial={isLast && idx === activeLogs.length - 1 ? { opacity: 0, x: -12, scale: 0.97 } : false}
                         animate={{ opacity: 1, x: 0, scale: 1 }}
-                        transition={isLast ? {
+                        transition={isLast && idx === activeLogs.length - 1 ? {
                           type: "spring",
                           stiffness: 400,
                           damping: 25,

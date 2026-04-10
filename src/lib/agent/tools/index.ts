@@ -90,10 +90,7 @@ import { telegramUserControllerTool } from './communication/telegram';
  * Total: 56 tools — EterX Next-Gen Agent OS v5
  */
 export function bootstrapTools() {
-  console.log('[ToolRegistry] Bootstrapping EterX Next-Gen Agent OS v5...');
-
   globalToolRegistry.registerTools([
-    // === Core (27) ===
     shellTool, webSearchTool, calculatorTool, apiCallerTool,
     jsRunnerTool, skillLoaderTool, systemMonitorTool, gitTool,
     clipboardTool, desktopNotifyTool, jsonTransformTool, screenshotTool,
@@ -105,36 +102,21 @@ export function bootstrapTools() {
     backgroundTaskTool, smartFileAnalyzerTool, chartGeneratorTool, codeIntelTool,
     deepResearchTool, smartRefactorTool, projectScaffolderTool,
     envManagerTool, autoDocsTool, gitIntelTool,
-    desktopControlTool,
-    browserControlTool,
-    askUserTool,
-    checkpointTool,
-
-    // === Workspace (13) ===
+    desktopControlTool, browserControlTool, askUserTool, checkpointTool,
     workspaceReadTool, workspaceWriteTool, workspaceListDirectoryTool,
     workspaceSearchTextTool, workspaceEditFileTool,
     workspaceRunCommandTool, workspaceVerifyCodeTool,
     csvAnalyzerTool, docxGeneratorTool, compressionTool,
     codeGeneratorTool, diffTool, markdownTool,
-
-    // === Research (4) ===
     webScraperTool, pdfParserTool, youtubeTranscriptTool, rssFeedTool,
-
-    // === Automation (5) ===
     schedulerTool, processManagerTool, fileWatcherTool, httpServerTool,
     chainExecutorTool,
-
-    // === Communication (2) ===
     whatsappControllerTool, telegramUserControllerTool,
   ]);
 
-  // Initialize dynamic skills (load user-created tools from disk)
   dynamicSkillEngine.initialize().catch(() => { });
-
   const total = globalToolRegistry.getAllTools().length;
-  console.log(`[ToolRegistry] ✅ ${ total } tools operational.`);
-  console.log(`[ToolRegistry] Core(42) | Workspace(13) | Research(4) | Automation(5) | Communication(2)`);
-  console.log(`[ToolRegistry] 🚀 EterX Next-Gen Agent OS v5 | 64 Tools | READY`);
+  console.log(`[ToolRegistry] ✅ ${total} tools ready`);
 }
 
 bootstrapTools();

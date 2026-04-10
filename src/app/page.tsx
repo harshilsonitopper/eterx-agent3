@@ -82,7 +82,7 @@ export default function DeepWorkUI() {
   const [inputValue, setInputValue] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [traceLogs, setTraceLogs] = useState<any[]>([]);
-  const [greeting, setGreeting] = useState("Evening");
+  const [greeting, setGreeting] = useState("Initializing...");
 
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -296,24 +296,71 @@ export default function DeepWorkUI() {
 
     const startRecording = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Request microphone with minimal processing — noiseSuppression can eat speech on some systems
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: true,
+          }
+        });
 
-        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        // Diagnostics: log what microphone we got
+        const tracks = stream.getAudioTracks();
+        console.log('[Voice] Got', tracks.length, 'audio track(s)');
+        tracks.forEach((t, i) => {
+          console.log(`[Voice] Track ${i}: label="${t.label}" enabled=${t.enabled} muted=${t.muted} readyState=${t.readyState}`);
+          const settings = t.getSettings();
+          console.log(`[Voice] Track ${i} settings:`, JSON.stringify(settings));
+        });
+
+        // Detect best supported mimeType
+        const mimeTypes = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/ogg;codecs=opus',
+          'audio/mp4',
+          'audio/wav',
+          ''
+        ];
+        let selectedMime = '';
+        for (const mime of mimeTypes) {
+          if (!mime || MediaRecorder.isTypeSupported(mime)) {
+            selectedMime = mime;
+            break;
+          }
+        }
+        console.log('[Voice] Using mimeType:', selectedMime || '(browser default)');
+
+        const recorderOptions: MediaRecorderOptions = {};
+        if (selectedMime) recorderOptions.mimeType = selectedMime;
+
+        const mediaRecorder = new MediaRecorder(stream, recorderOptions);
         mediaRecorderRef.current = mediaRecorder;
 
-        // Setup Silence Detection via AudioContext
+        // Setup AudioContext for volume visualization
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+        console.log('[Voice] AudioContext state:', audioContext.state, 'sampleRate:', audioContext.sampleRate);
+
         audioContextRef.current = audioContext;
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.5;
+        analyser.minDecibels = -90;
+        analyser.maxDecibels = -10;
         source.connect(analyser);
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const freqData = new Uint8Array(analyser.frequencyBinCount);
+        let volumeLogCounter = 0;
 
         mediaRecorder.ondataavailable = (e) => {
-          if (e.data.size > 0) {
+          if (e.data && e.data.size > 0) {
             audioChunksRef.current.push(e.data);
+            console.log('[Voice] Chunk received:', e.data.size, 'bytes');
           }
         };
 
@@ -332,18 +379,29 @@ export default function DeepWorkUI() {
             return;
           }
 
-          if (audioChunksRef.current.length === 0) return;
+          if (audioChunksRef.current.length === 0) {
+            console.warn('[Voice] No audio chunks collected');
+            return;
+          }
 
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          if (audioBlob.size < 1000) return; // Too short to matter
+          const blobType = mediaRecorder.mimeType || 'audio/webm';
+          const audioBlob = new Blob(audioChunksRef.current, { type: blobType });
+          console.log('[Voice] Final blob:', audioBlob.size, 'bytes, type:', blobType, 'chunks:', audioChunksRef.current.length);
+
+          if (audioBlob.size < 1000) {
+            console.warn('[Voice] Audio too short');
+            return;
+          }
 
           setIsProcessingVoice(true);
 
+          let ext = 'webm';
+          if (blobType.includes('ogg')) ext = 'ogg';
+          else if (blobType.includes('mp4')) ext = 'mp4';
+          else if (blobType.includes('wav')) ext = 'wav';
+
           const formData = new FormData();
-          formData.append('file', audioBlob, 'audio.webm');
-          formData.append('model', 'whisper-large-v3-turbo');
-          formData.append('response_format', 'json');
-          formData.append('language', 'en');
+          formData.append('file', audioBlob, `audio.${ext}`);
 
           try {
             const res = await fetch('/api/whisper', {
@@ -351,16 +409,21 @@ export default function DeepWorkUI() {
               body: formData
             });
 
-            if (!res.ok) throw new Error("Whisper API Error");
             const data = await res.json();
+            console.log('[Voice] Whisper response:', JSON.stringify(data));
 
-            if (data.text) {
+            if (data.filtered) {
+              // Server detected hallucination or empty audio
+              console.warn('[Voice] Speech not detected, reason:', data.reason);
+              setInputValue(transcriptBufferRef.current);
+              alert("Could not detect speech. Please check your microphone is selected correctly in Windows Sound Settings → Input.");
+            } else if (data.text && data.text.trim()) {
               setInputValue(transcriptBufferRef.current + data.text);
             } else {
               setInputValue(transcriptBufferRef.current);
             }
           } catch (e) {
-            console.error(e);
+            console.error('[Voice] Transcription error:', e);
             setInputValue(transcriptBufferRef.current);
             alert("Whisper Transcription Error: Could not connect to Groq.");
           } finally {
@@ -372,36 +435,49 @@ export default function DeepWorkUI() {
           cleanupAndTranscribe();
         };
 
+        // Volume monitoring — use frequency data for reliable speech detection
         silenceIntervalRef.current = setInterval(() => {
           if (isManualStopRef.current) {
             if (mediaRecorder.state === 'recording') mediaRecorder.stop();
             return;
           }
 
-          analyser.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-          const averageVolume = sum / dataArray.length;
-          setAudioVolume(averageVolume);
+          analyser.getByteFrequencyData(freqData);
+          // Use RMS of frequency bins for more accurate volume
+          let sumSquares = 0;
+          for (let i = 0; i < freqData.length; i++) {
+            sumSquares += freqData[i] * freqData[i];
+          }
+          const rms = Math.sqrt(sumSquares / freqData.length);
+          // Normalize to 0-100 range
+          const normalizedVolume = Math.min(100, (rms / 128) * 100);
+          setAudioVolume(normalizedVolume);
 
-          if (averageVolume > 15) {
+          // Log volume periodically for debugging
+          volumeLogCounter++;
+          if (volumeLogCounter % 25 === 0) { // every ~2 seconds
+            console.log('[Voice] Volume RMS:', rms.toFixed(1), 'normalized:', normalizedVolume.toFixed(1));
+          }
+
+          if (normalizedVolume > 5) {
             hasSpokenRef.current = true;
             lastSpeechTimeRef.current = Date.now();
           }
 
           const timeSinceLast = Date.now() - lastSpeechTimeRef.current;
-          const limit = hasSpokenRef.current ? 4000 : 15000;
+          const limit = hasSpokenRef.current ? 4000 : 20000; // 20s timeout if never spoke
 
           if (timeSinceLast >= limit) {
             if (mediaRecorder.state === 'recording') mediaRecorder.stop();
           }
-        }, 100);
+        }, 80);
 
         mediaRecorder.start();
         setIsRecording(true);
-      } catch (err) {
-        console.error("Microphone Error:", err);
-        alert("Microphone Error: Please grant microphone permissions.");
+        console.log('[Voice] Recording started. mimeType:', mediaRecorder.mimeType, 'state:', mediaRecorder.state);
+      } catch (err: any) {
+        console.error("[Voice] Microphone Error:", err);
+        alert("Microphone Error: " + (err.message || "Please grant microphone permissions."));
       }
     };
 
@@ -416,7 +492,7 @@ export default function DeepWorkUI() {
     if (!inputValue.trim() && attachments.length === 0) return;
     if (isThinking) return;
 
-    const prompt = inputValue || "Processing attached files...";
+    const prompt = inputValue;
     const currentAttachments = [...attachments];
     setInputValue("");
     setIsThinking(true);
@@ -521,15 +597,18 @@ export default function DeepWorkUI() {
                 if (parsed.data.type === 'thought_stream') {
                   updateActiveChatLogs(prev => {
                     const newLogs = [...prev];
+                    const subAgent = parsed.data.subAgent || null;
+                    // Only merge with the LAST thought_stream from the SAME agent
                     const lastLog = newLogs[newLogs.length - 1];
-                    if (lastLog && lastLog.type === 'thought_stream') {
+                    const sameSource = lastLog && lastLog.type === 'thought_stream' && (lastLog.subAgent || null) === subAgent;
+                    if (sameSource) {
                       newLogs[newLogs.length - 1] = { ...lastLog, text: parsed.data.text, endTime: Date.now() };
                     } else {
-                      newLogs.push({ type: 'thought_stream', text: parsed.data.text, startTime: Date.now(), endTime: Date.now() });
+                      newLogs.push({ type: 'thought_stream', text: parsed.data.text, subAgent, startTime: Date.now(), endTime: Date.now() });
                     }
                     return newLogs;
                   });
-                } else if (parsed.data.type === 'answer') {
+                } else if (parsed.data.type === 'answer' && !parsed.data.subAgent) {
                   updateActiveChatLogs(prev => {
                     const newLogs = [...prev];
 
@@ -613,6 +692,7 @@ export default function DeepWorkUI() {
         onSearchClick={() => setCmdPaletteOpen(true)}
         activeView={activeView}
         setActiveView={setActiveView}
+        isThinking={isThinking}
       />
 
       <div className="flex-1 flex flex-col relative bg-transparent overflow-hidden z-10">

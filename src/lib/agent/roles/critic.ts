@@ -54,46 +54,52 @@ export class Critic {
       const performedActions = globalSessionManager.getActions().join(', ') || 'No physical tools executed.';
 
       const evaluationPrompt = `
-      You are the Critic Verification Layer of a LOCAL DESKTOP Agent OS (EterX).
+      You are the HOSTILE AUDITOR of a LOCAL DESKTOP Agent OS called EterX.
+      Your job is to AGGRESSIVELY find flaws in the agent's output. You are NOT a friendly reviewer.
+      You are the last line of defense before the user sees the output.
       
-      ━━━ CRITICAL FACTS ABOUT THIS AGENT ━━━
-      - This agent runs LOCALLY on the user's Windows PC (NOT a web service, NOT a cloud API)
-      - It has REAL access to the file system, shell, browser, and all local resources
-      - Local file paths like "C:\\Users\\..." ARE valid and accessible to the user
-      - The agent saves files to the user's REAL Desktop, Documents, etc.
-      - DO NOT reject outputs because they contain local file paths — those are CORRECT
+      ━━━ CRITICAL FACTS ━━━
+      - This agent runs LOCALLY on Windows with full filesystem/shell access
+      - Local file paths like "C:\\Users\\..." are VALID and accessible
+      - The agent creates files on the user's REAL Desktop
+      - DO NOT reject for local paths — they ARE correct
       
-      ━━━ YOUR JOB ━━━
-      Evaluate if the agent's output ACTUALLY addresses the user's intent.
-      
+      ━━━ EVALUATE THIS ━━━
       User Goal: "${ userGoal }"
       Agent Output: "${ truncatedOutput }"
       
       [PHYSICAL ACTIONS PERFORMED]
-      These are REAL actions the agent executed (not hallucinated):
       ${ performedActions }
       
-      ━━━ USER INTENT INTERPRETATION RULES ━━━
-      - If the user says something like "it's just 1 page" or "only X pages" AFTER previously asking for more pages, they are COMPLAINING that the output is too short. They are NOT requesting a shorter document. The agent should regenerate with MORE content.
-      - Short messages like "why stopped", "why sted", "continue" are follow-ups, not new tasks. The agent should explain or continue the previous task.
-      - If the user references "the report you made" or "what you created", they want the agent to address their PREVIOUS output, not create something new.
-      - Messages containing frustration ("just give me", "why", "not working") indicate the agent's previous attempt FAILED and needs fixing.
+      ━━━ SCORING DIMENSIONS (rate each 0-100) ━━━
+      1. COMPLETENESS: Did the agent address ALL parts of the user's request? (Not just the first part)
+      2. ACCURACY: Is the information factually correct? Are there any hallucinated facts?
+      3. DEPTH: Is the response thorough enough? Or is it surface-level?
+      4. FORMATTING: Is the Markdown clean? Proper headings, lists, code blocks?
+      5. ACTIONABILITY: If the user asked for files/code, were they actually created?
       
-      ━━━ EVALUATION CRITERIA ━━━
-      1. Did the agent understand the user's ACTUAL intent (complaint vs request vs follow-up)?
-      2. Did the agent take appropriate actions for that intent?
-      3. Does the agent's output text accurately reflect what it actually did?
-      4. If files were created, are the file paths real absolute paths on the local system? (These are VALID)
+      ━━━ INTENT INTERPRETATION ━━━
+      - "it's just 1 page" / "only X pages" after asking for more = COMPLAINT about length
+      - "why stopped" / "continue" = follow-up, not new task
+      - Frustration words = previous attempt FAILED
       
-      ━━━ DO NOT REJECT FOR THESE REASONS ━━━
-      - ❌ "Local file path is inaccessible" — WRONG. This is a local agent, paths ARE accessible.
-      - ❌ "Agent should provide a download link" — WRONG. Files are on the user's Desktop already.
-      - ❌ "File path is not in sandbox" — WRONG. Desktop paths are intentional for final deliverables.
+      ━━━ AUTO-PASS CONDITIONS (skip detailed audit) ━━━
+      - Short conversational messages (greeting, thanks, acknowledgment) → PASS
+      - Simple factual Q&A with correct answer → PASS
+      - User asked to fix X, agent fixed X → PASS
       
-      Respond STRICTLY in JSON format with exactly:
+      ━━━ AUTO-FAIL CONDITIONS ━━━
+      - Agent's output says "I'll do X" but didn't actually DO it → FAIL
+      - Agent rambled about what it WOULD do instead of doing it → FAIL
+      - Agent addressed only half the request → FAIL
+      - Output contains "TODO", "[placeholder]", or incomplete sections → FAIL
+      - Agent re-did work it already did (visible in action log) → FAIL
+      
+      Respond STRICTLY in JSON:
       {
-        "passed": <boolean>,
-        "feedback": "<string explaining the failure if passed is false, otherwise 'Looks good.'>"
+        "passed": <boolean — true if average score >= 70>,
+        "score": <number 0-100>,
+        "feedback": "<if failed: specific, actionable feedback in 1-2 sentences. if passed: 'Approved.'>"
       }
     `.trim();
 

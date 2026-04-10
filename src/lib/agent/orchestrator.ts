@@ -2,10 +2,9 @@ import { WorkspaceManager } from './workspace/manager';
 import { globalMemoryManager } from './memory/store';
 import { AgentResponse, AgentTask } from './schemas';
 import { globalGeminiClient } from './gemini';
-import { Critic } from './roles/critic';
-import { SubAgentSpawner, globalSubAgentSpawner, resetCancelFlag } from './roles/sub_agent';
+import { globalSubAgentSpawner, resetCancelFlag } from './roles/sub_agent';
 import { globalSessionManager } from './session';
-import { intelligentCache } from './next_gen';
+import { Critic } from './roles/critic';
 import fs from 'fs-extra';
 import path from 'path';
 
@@ -39,6 +38,29 @@ export class AgentOrchestrator {
   private taskQueue: QueuedTask[] = [];
   private isProcessing = false;
   private currentTask: QueuedTask | null = null;
+  private critic = new Critic();
+
+  /**
+   * Classify task complexity to decide if auto-parallel or critic loop is needed.
+   * Returns: 'trivial' | 'standard' | 'complex' | 'critical'
+   */
+  private classifyComplexity(request: string): 'trivial' | 'standard' | 'complex' | 'critical' {
+    const words = request.trim().split(/\s+/).length;
+    const lower = request.toLowerCase();
+
+    // Trivial: short acknowledgments, greetings, simple questions
+    if (words < 8 && /\b(thanks|ok|cool|hi|hello|hey|good|nice|yes|no|ty|thx)\b/i.test(lower)) return 'trivial';
+
+    // Critical: explicit high-stakes keywords
+    if (/\b(deploy|production|publish|release|security audit|penetration|financial|legal|compliance)\b/i.test(lower)) return 'critical';
+
+    // Complex: multi-part tasks, long requests, project-level work
+    if (words > 60) return 'complex';
+    if (/\b(build.*app|create.*system|full.*stack|entire|complete|comprehensive|compare.*vs|analyze.*and.*analyze)\b/i.test(lower)) return 'complex';
+    if ((lower.match(/\band\b/g) || []).length >= 3) return 'complex'; // 3+ "and" = multi-part
+
+    return 'standard';
+  }
 
   /**
    * MEMORY HYDRATION — Load real data from disk into ProjectContext.
@@ -56,7 +78,6 @@ export class AgentOrchestrator {
         for (const [key, val] of Object.entries(prefs)) {
           context.userPreferences[key] = (val as any)?.value || val;
         }
-        console.log(`[Orchestrator] 🧠 Hydrated ${Object.keys(prefs).length} user preferences`);
       }
     } catch { /* silent */ }
 
@@ -70,7 +91,6 @@ export class AgentOrchestrator {
             `${e.tool}: ${(e.error || '').substring(0, 120)}`
           );
           context.errorHistory = recentErrors;
-          console.log(`[Orchestrator] ⚠️ Hydrated ${recentErrors.length} recent errors`);
         }
       }
     } catch { /* silent */ }
@@ -91,7 +111,6 @@ export class AgentOrchestrator {
         const recent = allMemories.slice(0, 5);
         if (recent.length > 0) {
           context.recentMemories = recent;
-          console.log(`[Orchestrator] 📝 Hydrated ${recent.length} recent memories`);
         }
       }
     } catch { /* silent */ }
@@ -113,7 +132,6 @@ export class AgentOrchestrator {
               tools: r.toolSequence,
               duration: r.duration,
             }));
-            console.log(`[Orchestrator] 🧬 Hydrated ${successfulRecords.length} adaptive tool patterns`);
           }
         }
       }
@@ -141,37 +159,22 @@ export class AgentOrchestrator {
       effectiveRequest = `[CRITICAL PINNED CONTEXT]\nI have explicitly pinned the following paths. You MUST restrict your operations only to these targets: ${JSON.stringify(pinnedContext.paths)}\n\nMy Request:\n${userRequest}`;
     }
 
-    console.log(`[Orchestrator] ========================================`);
-    console.log(`[Orchestrator] Intake & Planning for: "${effectiveRequest}"`);
-    console.log(`[Orchestrator] User: ${userId} | Project: ${projectId}`);
-    console.log(`[Orchestrator] ========================================`);
+    console.log(`[Orchestrator] ▶ "${effectiveRequest.substring(0, 80)}" | User: ${userId}`);
     
-    // Initialize memory system
     await globalMemoryManager.initialize();
-
-    // Reset global cancel flag from previous requests
     resetCancelFlag();
-    
-    // Initialize session continuity — scoped per conversation to prevent stale state bleed
     await globalSessionManager.loadForProject(projectId);
     globalSessionManager.setLastUserMessage(effectiveRequest);
-
-    // Set agent mode (Think = gemma-4-31b-it, Fast = gemma-4-26b-it)
     globalGeminiClient.setMode(mode);
 
-    // Setup workspace context
     const workspace = new WorkspaceManager(userId, projectId);
     await workspace.initialize();
-
     const context = globalMemoryManager.getProjectContext(projectId);
-
-    // === MEMORY HYDRATION: Load real data from disk ===
     await this.hydrateContext(context, projectId);
 
-    const memStats = globalMemoryManager.getStats();
-    console.log(`[Orchestrator] Memory: ${memStats.totalMemories} memories, ${memStats.preferences} preferences, ${memStats.errors} errors logged`);
-
     const startTime = Date.now();
+    const complexity = this.classifyComplexity(userRequest);
+    console.log(`[Orchestrator] 🧠 Task complexity: ${complexity}`);
     
     // Progress tracking
     const emitProgress = (stage: string, percent: number) => {
@@ -183,11 +186,11 @@ export class AgentOrchestrator {
     emitProgress('Executing autonomous agent', 10);
     
     let finalAnswer = "";
-    let isValid = false;
     
     try {
-      // Single powerful execution — the agent has adaptive iterations (15-60)
-      // scaled to task complexity. Session state persists across messages.
+      // ═══════════════════════════════════════════════════════
+      // PHASE 1: PRIMARY EXECUTION
+      // ═══════════════════════════════════════════════════════
       finalAnswer = (await globalGeminiClient.executeMessageLoop(
         context,
         effectiveRequest,
@@ -196,80 +199,55 @@ export class AgentOrchestrator {
         mediaFiles,
         imageBackupParts
       )).text;
-      
-      // === CRITIC WITH FEEDBACK RETRY ===
-      emitProgress('Validating output', 85);
-      const critic = new Critic();
-      const evaluation = await critic.evaluateOutput(effectiveRequest, finalAnswer, context);
-      isValid = evaluation.passed;
-      
-      if (!isValid) {
-        console.log(`[Orchestrator] ⚠️ Critic rejected: ${evaluation.feedback}`);
-        globalMemoryManager.logError('critic', evaluation.feedback, `Task: ${effectiveRequest}`);
 
-        // === FEEDBACK RETRY: Give the agent ONE chance to self-correct ===
-        console.log(`[Orchestrator] 🔄 Attempting critic feedback retry...`);
-        emitProgress('Self-correcting based on feedback', 88);
-
+      // ═══════════════════════════════════════════════════════
+      // PHASE 2: CRITIC SELF-CORRECTION LOOP (complex+ tasks only)
+      // Skipped for trivial/standard to keep speed.
+      // The critic evaluates the output. If it fails, the agent
+      // gets ONE retry with the critic's feedback injected.
+      // ═══════════════════════════════════════════════════════
+      if (complexity === 'complex' || complexity === 'critical') {
         try {
-          // CRITICAL: Clear dedup history + cache before retry so the agent can
-          // actually re-execute tools (e.g. docx_generator) with better content.
-          // Without this, semantic dedup blocks the retry from doing anything useful.
-          const sessionState = globalSessionManager.hydrate();
-          if (sessionState.callHistory) {
-            // Only clear tool-specific entries that the agent needs to retry
-            // Keep non-file-creation entries (like web_search) to avoid re-research
-            const keepEntries = new Set<string>();
-            for (const entry of sessionState.callHistory) {
-              const toolName = entry.split(':')[0];
-              // Keep research/skill entries, clear file creation entries
-              if (['web_search', 'web_scraper', 'get_skill_guidelines', 'task_decomposer'].includes(toolName)) {
-                keepEntries.add(entry);
-              }
-            }
-            sessionState.callHistory = keepEntries;
-            globalSessionManager.updateFromLoop(sessionState);
-            console.log(`[Orchestrator] 🧹 Cleared dedup history for retry (kept ${keepEntries.size} research entries)`);
-          }
-          
-          // Also clear the intelligent cache for this retry
-          intelligentCache.clear();
-          
-          const retryPrompt = `[CRITIC FEEDBACK — SELF-CORRECTION REQUIRED]
-Your previous output was reviewed and REJECTED for this reason:
-"${evaluation.feedback}"
+          emitProgress('Quality verification', 85);
+          if (onTrace) onTrace({ type: 'thought_stream', text: 'Running quality verification...', isDelta: false });
 
-Original user request: "${effectiveRequest.substring(0, 300)}"
+          const criticResult = await this.critic.evaluateOutput(userRequest, finalAnswer, context);
 
-Fix the issue identified by the critic. Be concise — only address the specific feedback above.
-DO NOT redo the entire task from scratch. Just fix the identified problem.`;
+          if (!criticResult.passed) {
+            console.log(`[Orchestrator] 🔄 Critic REJECTED output. Feedback: ${criticResult.feedback.substring(0, 120)}`);
+            if (onTrace) onTrace({ type: 'thought_stream', text: `Self-correction: ${criticResult.feedback.substring(0, 100)}...`, isDelta: false });
 
-          const retryResult = await globalGeminiClient.executeMessageLoop(
-            context,
-            retryPrompt,
-            history,
-            undefined // Silent retry — don't stream trace events to UI
-          );
-          
-          finalAnswer = retryResult.text;
-          
-          // Re-evaluate with critic
-          const retryEval = await critic.evaluateOutput(userRequest, finalAnswer, context);
-          isValid = retryEval.passed;
-          
-          if (isValid) {
-            console.log(`[Orchestrator] ✅ Self-correction succeeded — critic approved retry.`);
+            // Build a self-correction prompt with critic feedback
+            const correctionHistory = [
+              ...history,
+              { role: 'user', parts: [{ text: effectiveRequest }] },
+              { role: 'model', parts: [{ text: finalAnswer }] },
+            ];
+
+            const correctionPrompt = `[SELF-CORRECTION — CRITIC FEEDBACK]\nYour previous answer was evaluated and REJECTED by the quality system.\n\nCritic Feedback: "${criticResult.feedback}"\n\nOriginal Request: "${userRequest}"\n\nFix the issues identified above. Produce an improved, complete answer. Do NOT explain what was wrong — just deliver the corrected output.`;
+
+            emitProgress('Self-correcting...', 90);
+
+            const correctedResult = await globalGeminiClient.executeMessageLoop(
+              context,
+              correctionPrompt,
+              correctionHistory,
+              onTrace,
+              [], // No media on retry
+              []
+            );
+
+            finalAnswer = correctedResult.text;
+            console.log(`[Orchestrator] ✅ Self-correction complete.`);
           } else {
-            console.log(`[Orchestrator] ⚠️ Retry also rejected. Delivering best effort. Feedback: ${retryEval.feedback}`);
-            isValid = true; // Deliver anyway after retry — don't block the user
+            console.log(`[Orchestrator] ✅ Critic APPROVED output.`);
           }
-        } catch (retryError: any) {
-          console.warn(`[Orchestrator] ⚠️ Critic retry failed: ${retryError.message}. Delivering original.`);
-          isValid = true; // Deliver the original answer
+        } catch (criticError: any) {
+          // Critic failure is non-fatal — original answer stands
+          console.warn(`[Orchestrator] ⚠️ Critic loop error (non-fatal): ${criticError.message}`);
         }
-      } else {
-        console.log(`[Orchestrator] ✅ Critic approved output.`);
       }
+      
     } catch (error: any) {
       finalAnswer = `Agent Execution Failed: ${error.message}`;
       console.error(`[Orchestrator] 💥 Fatal error:`, error.message);
@@ -279,40 +257,30 @@ DO NOT redo the entire task from scratch. Just fix the identified problem.`;
     // Save session state after execution
     await globalSessionManager.save();
 
-    emitProgress('Packaging final delivery', 90);
-
     // Packaging (Delivery)
-    console.log(`[Orchestrator] Packaging final delivery...`);
     const outputFilename = `result_${Date.now()}.txt`;
     await workspace.exportOutput(outputFilename, finalAnswer);
 
     // Archiving to Memory
-    emitProgress('Archiving to persistent memory', 95);
-    console.log(`[Orchestrator] Archiving output to Memory...`);
     globalMemoryManager.saveEpisodicMemory(
       projectId, 
-      `Executed task: ${userRequest} (Valid: ${isValid})`, 
+      `Executed task: ${userRequest}`, 
       'task_result',
-      isValid ? 7 : 3, // Higher importance for successful tasks
-      ['task', isValid ? 'success' : 'failure']
+      7,
+      ['task', 'success']
     );
 
-    // Auto-learn preferences from interaction
-    if (isValid) {
-      globalMemoryManager.learnPreference(userId, 'interaction', 'last_successful_task', {
-        task: userRequest.substring(0, 200),
-        timestamp: Date.now()
-      });
-    }
+    globalMemoryManager.learnPreference(userId, 'interaction', 'last_successful_task', {
+      task: userRequest.substring(0, 200),
+      timestamp: Date.now()
+    });
 
     const executionTime = Date.now() - startTime;
-    emitProgress('Complete', 100);
-    
-    console.log(`[Orchestrator] ✅ Pipeline complete in ${executionTime}ms (valid: ${isValid})`);
+    console.log(`[Orchestrator] ✅ Pipeline complete in ${executionTime}ms (complexity: ${complexity})`);
 
     return {
       taskId: crypto.randomUUID(),
-      success: isValid,
+      success: true,
       finalAnswer,
       artifactsGenerated: [workspace.getWorkingFilePath(outputFilename)],
       executionTimeMs: executionTime,

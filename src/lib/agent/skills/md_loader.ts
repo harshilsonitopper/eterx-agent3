@@ -169,7 +169,6 @@ export function loadMarkdownSkills(): AgentSkill[] {
       .filter(f => f.endsWith('.md'))
       .sort(); // Alphabetical for consistent load order
 
-    console.log(`[SkillLoader] 📂 Scanning ${skillsDir} — found ${files.length} .md files`);
 
     for (const file of files) {
       try {
@@ -201,7 +200,6 @@ export function loadMarkdownSkills(): AgentSkill[] {
           systemPromptAddendum: parsed.body,
         });
 
-        console.log(`[SkillLoader] ✅ ${file} → id="${id}" name="${displayName}" icon=${icon}`);
       } catch (err) {
         console.warn(`[SkillLoader] ⚠️  Failed to load ${file}:`, err);
       }
@@ -210,6 +208,6 @@ export function loadMarkdownSkills(): AgentSkill[] {
     console.error('[SkillLoader] ❌ Could not read skills directory:', err);
   }
 
-  console.log(`[SkillLoader] 🏁 Total skills loaded from .md: ${skills.length}`);
+  console.log(`[SkillLoader] ✅ ${skills.length} skills loaded`);
   return skills;
 }

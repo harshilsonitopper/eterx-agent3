@@ -39,8 +39,7 @@ export interface SessionState {
   taskDecomposerUsed: boolean;
   /** Per-tool call counts */
   toolCallCounts: Record<string, number>;
-  /** Per-category call counts */
-  categoryCallCounts: Record<string, number>;
+
   /** Last user message (for "continue" context) */
   lastUserMessage: string;
   /** Summary of what the agent accomplished */
@@ -62,7 +61,7 @@ const EMPTY_STATE: SessionState = {
   loadedSkills: [],
   taskDecomposerUsed: false,
   toolCallCounts: {},
-  categoryCallCounts: {},
+
   lastUserMessage: '',
   actionSummary: [],
   lastAgentOutput: '',
@@ -119,7 +118,7 @@ export class SessionStateManager {
         loadedSkills: Array.isArray(data.loadedSkills) ? data.loadedSkills : [],
         taskDecomposerUsed: !!data.taskDecomposerUsed,
         toolCallCounts: data.toolCallCounts || {},
-        categoryCallCounts: data.categoryCallCounts || {},
+
         lastUserMessage: data.lastUserMessage || '',
         actionSummary: Array.isArray(data.actionSummary) ? data.actionSummary : [],
         lastAgentOutput: data.lastAgentOutput || '',
@@ -190,7 +189,7 @@ export class SessionStateManager {
     loadedSkills: Set<string>;
     taskDecomposerUsed: boolean;
     toolCallCounts: Map<string, number>;
-    categoryCallCounts: Map<string, number>;
+
   } {
     return {
       callHistory: new Set(this.state.callHistory),
@@ -198,7 +197,7 @@ export class SessionStateManager {
       loadedSkills: new Set(this.state.loadedSkills),
       taskDecomposerUsed: this.state.taskDecomposerUsed,
       toolCallCounts: new Map(Object.entries(this.state.toolCallCounts)),
-      categoryCallCounts: new Map(Object.entries(this.state.categoryCallCounts)),
+
     };
   }
 
@@ -211,14 +210,14 @@ export class SessionStateManager {
     loadedSkills: Set<string>;
     taskDecomposerUsed: boolean;
     toolCallCounts: Map<string, number>;
-    categoryCallCounts: Map<string, number>;
+
   }): void {
     this.state.callHistory = Array.from(data.callHistory);
     this.state.writtenFiles = Array.from(data.writtenFiles);
     this.state.loadedSkills = Array.from(data.loadedSkills);
     this.state.taskDecomposerUsed = data.taskDecomposerUsed;
     this.state.toolCallCounts = Object.fromEntries(data.toolCallCounts);
-    this.state.categoryCallCounts = Object.fromEntries(data.categoryCallCounts);
+
   }
 
   /** Record the user's message for "continue" context. */

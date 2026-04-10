@@ -60,25 +60,12 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   return (
     <div className="flex-1 w-full flex flex-col overflow-y-auto pb-44 px-4 sm:px-12 md:px-24 scrollbar-hide" id="chat-container" onScroll={handleScrollWrap}>
 
-      {/* Scroll to Bottom Button */}
-      <AnimatePresence>
-        {showScrollBottom && (
-          <motion.button
-            initial={{ opacity: 0, scale: 0.8, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 10 }}
-            onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
-            className="fixed bottom-28 right-8 w-10 h-10 rounded-full border border-white/10 bg-black/80 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.5)] flex items-center justify-center text-[#E8E6E3] hover:bg-[#1A1A1A] hover:border-white/20 transition-all z-40 transform hover:-translate-y-1 active:scale-95"
-          >
-            <ChevronDown className="w-5 h-5" />
-          </motion.button>
-        )}
-      </AnimatePresence>
+
 
       {/* Interactive Minimap Scrubber */}
       {groups.length > 0 && (
         <div className="fixed right-0 top-1/2 -translate-y-1/2 flex flex-col items-end gap-2 z-30 py-4 hidden lg:flex opacity-70 hover:opacity-100 transition-opacity duration-300 pr-3">
-          <button onClick={() => document.getElementById('chat-container')?.scrollTo({ top: 0, behavior: 'smooth' })} className="text-[#8C8A88] hover:text-[#E8E6E3] transition-colors p-1 mr-[2px]" title="Scroll to top">
+          <button onClick={() => document.getElementById('chat-container')?.scrollTo({ top: 0, behavior: 'smooth' })} className="text-[#8C8A88] hover:text-[#E8E6E3] transition-colors p-1 mr-[-4px]" title="Scroll to top">
             <ChevronUp className="w-4 h-4" />
           </button>
 
@@ -110,7 +97,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             })}
           </div>
 
-          <button onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })} className="text-[#8C8A88] hover:text-[#E8E6E3] transition-colors p-1 mr-[2px]" title="Scroll to bottom">
+          <button onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })} className="text-[#8C8A88] hover:text-[#E8E6E3] transition-colors p-1 mr-[-4px]" title="Scroll to bottom">
             <ChevronDown className="w-4 h-4" />
           </button>
         </div>
@@ -128,7 +115,8 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                       <div className="flex flex-wrap justify-end gap-2.5 mb-3 w-full">
                         {first.attachments.map((att: any, i: number) => {
                           const isImage = !!att.preview;
-                          const extension = att.file.name.split('.').pop()?.toUpperCase() || 'FILE';
+                          const fileName = att.file?.name || att.name || 'file';
+                          const extension = fileName.split('.').pop()?.toUpperCase() || 'FILE';
                           const isPdf = extension === 'PDF';
                           
                           if (isImage) {
@@ -144,13 +132,13 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                               <div className={`w-[26px] h-[26px] rounded-md flex items-center justify-center shrink-0 shadow-sm ${isPdf ? 'bg-[#EF4444]' : 'bg-[#007AFF]'}`}>
                                 <FileText className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
                               </div>
-                              <span className="text-[10px] font-medium text-[#E8E6E3] truncate max-w-[90%] px-1">{extension}</span>
+                              <span className="text-[10px] font-medium text-[#E8E6E3] truncate max-w-[90%] px-1">{att.name || fileName}</span>
                             </div>
                           );
                         })}
                       </div>
                     )}
-                    <span className="w-full text-left">{first.text}</span>
+                    <span className="w-full text-left break-words [word-break:break-word] [overflow-wrap:anywhere]">{first.text}</span>
                     <div className="absolute -bottom-8 right-0 flex items-center gap-1 opacity-0 group-hover/user:opacity-100 transition-opacity duration-200 pointer-events-none group-hover/user:pointer-events-auto">
                       <Tooltip text="Copy message">
                         <button onClick={() => navigator.clipboard.writeText(first.text)} className="p-1.5 text-[#8C8A88] hover:text-[#E8E6E3] bg-white/5 hover:bg-white/10 rounded-md transition-all border border-white/5 backdrop-blur-sm">
